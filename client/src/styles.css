@@ -89,6 +89,11 @@ h1, h2, h3, p { margin-top: 0; }
 .missing-label { color: #ce6c50; }
 .paused-label { color: #9a7a30; }
 .offer-row.inactive .offer-name strong, .offer-row.inactive .stats-number { color: #9ba3b0; }
+.offer-row.pending-change { background: #fffaf0; }
+.offer-row.pending-change:hover { background: #fff6e2; }
+.pending-control { background-color: #fff1c9 !important; }
+.offer-row .pending-control { border-color: #ebcf87; }
+.pending-label { color: #a87932; font-weight: 600; }
 .toggle { width: 29px; height: 17px; flex: 0 0 29px; padding: 2px; border: 0; border-radius: 20px; background: #d8dde6; transition: .16s; }
 .toggle span { width: 13px; height: 13px; display: block; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px #0002; transition: .16s; }
 .toggle.on { background: #42b889; }
@@ -111,6 +116,8 @@ h1, h2, h3, p { margin-top: 0; }
 .distribution-hint { color: #9aa3b0; font-size: 10px; }
 .pin-example { margin-right: 4px; color: #5974e8; }
 .save-button { padding: 8px 12px; font-size: 10px; }
+.stream-actions { display: flex; align-items: center; gap: 7px; }
+.reset-button { padding: 8px 12px; font-size: 10px; }
 .add-offer-row { display: flex; align-items: center; gap: 8px; padding: 12px 20px 15px; }
 .add-picker { flex: 1; min-width: 100px; }
 .offer-picker { position: relative; width: 100%; }
@@ -214,6 +221,8 @@ h1, h2, h3, p { margin-top: 0; }
   .stream-heading { padding: 12px; }
   .stream-filter { margin-left: 12px; margin-right: 12px; }
   .stream-footer { align-items: flex-start; flex-direction: column; padding: 10px 12px; }
+  .stream-actions { width: 100%; }
+  .stream-actions .button { flex: 1; }
   .add-offer-row { flex-wrap: wrap; padding: 10px 12px 13px; }
   .add-picker { flex-basis: 100%; }
   .add-offer-row .button { flex: 1; }

@@ -111,13 +111,93 @@ function Header({ page, setPage }) {
   );
 }
 
-function OfferRow({ offer, onActive, onPin, onShare, saving }) {
+function allocateShares(items, total) {
+  if (!items.length) return [];
+  const weights = items.map((item) => Math.max(0, Number(item.share) || 0));
+  const weightTotal = weights.reduce((sum, weight) => sum + weight, 0);
+  if (!weightTotal) {
+    const base = Math.floor(total / items.length);
+    return items.map((_, index) => base + (index < total % items.length ? 1 : 0));
+  }
+  const raw = weights.map((weight) => (weight * total) / weightTotal);
+  const shares = raw.map(Math.floor);
+  const remainder = total - shares.reduce((sum, share) => sum + share, 0);
+  raw.map((share, index) => ({ index, fraction: share - shares[index] }))
+    .sort((left, right) => right.fraction - left.fraction)
+    .slice(0, remainder)
+    .forEach(({ index }) => { shares[index] += 1; });
+  return shares;
+}
+
+function balanceDraftOffers(offers) {
+  const active = offers.filter((item) => item.active);
+  const pinnedTotal = active.filter((item) => item.pinned).reduce((sum, item) => sum + item.share, 0);
+  const flexible = active.filter((item) => !item.pinned);
+  const shares = allocateShares(flexible, 100 - pinnedTotal);
+  const nextShares = new Map(flexible.map((item, index) => [item.offer_id, shares[index]]));
+  return offers.map((item) => ({
+    ...item,
+    share: item.active ? (item.pinned ? item.share : nextShares.get(item.offer_id)) : 0,
+  }));
+}
+
+function setDraftOfferShare(offers, offerId, requestedShare) {
+  const active = offers.filter((item) => item.active);
+  const target = active.find((item) => item.offer_id === offerId);
+  if (!target || target.pinned) return offers;
+  const pinnedTotal = active.filter((item) => item.pinned).reduce((sum, item) => sum + item.share, 0);
+  const others = active.filter((item) => !item.pinned && item.offer_id !== offerId);
+  const maxShare = 100 - pinnedTotal;
+  if (maxShare < 0) throw new Error("Закреплённые офферы уже занимают больше 100%");
+  const share = Math.min(maxShare, Math.max(0, requestedShare));
+  const targetShare = others.length ? share : maxShare;
+  const otherShares = allocateShares(others, maxShare - targetShare);
+  const shares = new Map([
+    [offerId, targetShare],
+    ...others.map((item, index) => [item.offer_id, otherShares[index]]),
+  ]);
+  return offers.map((item) => item.active && !item.pinned
+    ? { ...item, share: shares.get(item.offer_id) }
+    : item);
+}
+
+function draftOfferChanged(original, draft) {
+  if (!original) return true;
+  return original.active !== draft.active
+    || original.pinned !== draft.pinned
+    || (draft.active ? original.share !== draft.share : original.last_share !== draft.last_share);
+}
+
+function getDraftOffers(stream, drafts) {
+  const streamDrafts = drafts[stream.id] || {};
+  const originalIds = new Set(stream.offers.map((item) => item.offer_id));
+  return [
+    ...stream.offers.map((item) => ({
+      ...item,
+      ...(streamDrafts[item.offer_id] || {}),
+    })),
+    ...Object.values(streamDrafts).filter((item) => !originalIds.has(item.offer_id)),
+  ];
+}
+
+function createInitialDrafts(data) {
+  return Object.fromEntries(data.streams.map((stream) => [
+    stream.id,
+    Object.fromEntries(stream.offers.map((item) => [item.offer_id, {
+      ...item,
+      share: item.active ? item.share : 0,
+      last_share: item.last_share ?? item.share,
+    }])),
+  ]));
+}
+
+function OfferRow({ offer, dirty, onActive, onPin, onShare, saving }) {
   const inactive = !offer.active;
   return (
-    <tr className={inactive ? "offer-row inactive" : "offer-row"}>
+    <tr className={`${inactive ? "offer-row inactive" : "offer-row"}${dirty ? " pending-change" : ""}`}>
       <td className="offer-cell">
         <button
-          className={inactive ? "toggle" : "toggle on"}
+          className={`${inactive ? "toggle" : "toggle on"}${dirty ? " pending-control" : ""}`}
           type="button"
           role="switch"
           aria-checked={offer.active}
@@ -142,13 +222,14 @@ function OfferRow({ offer, onActive, onPin, onShare, saving }) {
                 min="0"
                 max="100"
                 value={offer.share}
-                disabled={offer.pinned}
+                className={dirty ? "pending-control" : ""}
+                disabled={saving || offer.pinned}
                 onChange={(event) => onShare(offer, event.target.value)}
                 aria-label={`Доля оффера ${offer.offer_id}`}
               />
               <span>%</span>
             </div>
-          : <span className="stored-share">{offer.last_share}% <small>сохранено</small></span>}
+          : <span className={`stored-share${dirty ? " pending-control" : ""}`}>{offer.last_share}% <small>сохранено</small></span>}
       </td>
       <td className="stats-number">{offer.clicks.toLocaleString("ru-RU")}</td>
       <td className="stats-number">{offer.unique_clicks.toLocaleString("ru-RU")}</td>
@@ -156,7 +237,7 @@ function OfferRow({ offer, onActive, onPin, onShare, saving }) {
       <td className="action-cell">
         <button
           type="button"
-          className={offer.pinned ? "icon-button pinned" : "icon-button"}
+          className={`${offer.pinned ? "icon-button pinned" : "icon-button"}${dirty ? " pending-control" : ""}`}
           title={offer.pinned ? "Открепить долю" : "Закрепить текущую долю"}
           aria-label={offer.pinned ? "Открепить долю" : "Закрепить текущую долю"}
           disabled={saving || inactive}
@@ -184,10 +265,18 @@ function App() {
   const [addOffer, setAddOffer] = useState(null);
   const [addShare, setAddShare] = useState("");
   const [drafts, setDrafts] = useState({});
+  const hasPendingDrafts = useMemo(() => view?.streams.some((stream) => (
+    getDraftOffers(stream, drafts).some((item) => draftOfferChanged(
+      stream.offers.find((original) => original.offer_id === item.offer_id),
+      item,
+    ))
+  )) || false, [drafts, view]);
 
   const activeOfferCount = useMemo(
-    () => view?.streams.reduce((count, stream) => count + stream.offers.filter((item) => item.active).length, 0) || 0,
-    [view],
+    () => view?.streams.reduce((count, stream) => (
+      count + getDraftOffers(stream, drafts).filter((item) => item.active).length
+    ), 0) || 0,
+    [drafts, view],
   );
 
   const loadMeta = useCallback(async () => {
@@ -209,8 +298,12 @@ function App() {
     try {
       const list = await api(`/campaigns?q=${encodeURIComponent(filter)}`);
       setCampaigns(list);
-      if (list.length && !list.some((item) => String(item.id) === campaignId)) setCampaignId(String(list[0].id));
+      if (list.length && !list.some((item) => String(item.id) === campaignId)) {
+        if (hasPendingDrafts && !window.confirm("Есть несохранённые изменения. Сбросить их и открыть другую кампанию?")) return list;
+        setCampaignId(String(list[0].id));
+      }
       if (!list.length) {
+        if (hasPendingDrafts && !window.confirm("Есть несохранённые изменения. Сбросить их?")) return list;
         setCampaignId("");
         setView(null);
       }
@@ -219,7 +312,7 @@ function App() {
       notify(error.message, "error");
       return [];
     }
-  }, [campaignId, notify, query]);
+  }, [campaignId, hasPendingDrafts, notify, query]);
 
   const loadView = useCallback(async (id = campaignId, period = interval) => {
     if (!id) return;
@@ -227,13 +320,7 @@ function App() {
     try {
       const data = await api(`/campaigns/${id}?interval=${encodeURIComponent(period)}`);
       setView(data);
-      const initialDrafts = {};
-      data.streams.forEach((stream) => {
-        initialDrafts[stream.id] = Object.fromEntries(
-          stream.offers.filter((item) => item.active).map((item) => [item.offer_id, item.share]),
-        );
-      });
-      setDrafts(initialDrafts);
+      setDrafts(createInitialDrafts(data));
     } catch (error) {
       notify(error.message, "error");
     } finally {
@@ -247,75 +334,83 @@ function App() {
     if (page === "editor" && campaignId) loadView();
   }, [page, campaignId, interval, loadView]);
 
-  const setOfferState = async (stream, item, patch) => {
-    setSaving(true);
-    try {
-      const activeOffers = stream.offers.filter((entry) => entry.active);
-      const pendingShares = activeOffers.map((entry) => ({
-        offer_id: entry.offer_id,
-        share: entry.pinned ? entry.share : Number(drafts[stream.id]?.[entry.offer_id] ?? entry.share),
-      }));
-      const hasPendingShares = pendingShares.some((entry) => (
-        entry.share !== activeOffers.find((offerItem) => offerItem.offer_id === entry.offer_id)?.share
-      ));
-      if (hasPendingShares) {
-        const total = pendingShares.reduce((sum, entry) => sum + entry.share, 0);
-        if (total !== 100) throw new Error(`Сначала распределите ровно 100%, сейчас ${total}%`);
-        await api(`/campaigns/${view.campaign.id}/streams/${stream.id}/offers`, {
-          method: "PUT",
-          body: { shares: pendingShares },
-        });
+  const updateStreamDraft = (streamId, offers) => {
+    setDrafts((current) => ({
+      ...current,
+      [streamId]: Object.fromEntries(offers.map((item) => [item.offer_id, item])),
+    }));
+  };
+
+  const setOfferState = (stream, item, patch) => {
+    const offers = getDraftOffers(stream, drafts);
+    const target = offers.find((entry) => entry.offer_id === item.offer_id);
+    if (!target) return;
+    if (typeof patch.active === "boolean") {
+      if (patch.active) {
+        if (!target.available_in_keitaro) {
+          notify(`Оффер ${target.offer_id} сначала нужно восстановить в Keitaro`, "error");
+          return;
+        }
+        target.active = true;
+        target.pinned = false;
+        target.share = target.last_share || 1;
+        updateStreamDraft(stream.id, balanceDraftOffers(offers));
+        return;
       }
-      await api(`/campaigns/${view.campaign.id}/streams/${stream.id}/offers/${item.offer_id}`, {
-        method: "PATCH",
-        body: patch,
-      });
-      await loadView();
-      notify(patch.active === false ? "Оффер деактивирован, доля сохранена" : patch.active ? "Оффер активирован" : patch.pinned ? "Доля закреплена" : "Доля откреплена");
-    } catch (error) {
-      notify(error.message, "error");
-    } finally {
-      setSaving(false);
+      if (offers.filter((entry) => entry.active).length <= 1) {
+        notify("Нельзя деактивировать последний активный оффер потока", "error");
+        return;
+      }
+      target.last_share = target.share;
+      target.share = 0;
+      target.active = false;
+      target.pinned = false;
+      updateStreamDraft(stream.id, balanceDraftOffers(offers));
+      return;
+    }
+    if (typeof patch.pinned === "boolean") {
+      target.pinned = patch.pinned;
+      updateStreamDraft(stream.id, offers);
     }
   };
 
   const redistributeDraft = (stream, item, value) => {
     const requested = Math.max(0, Math.min(100, Number.parseInt(value, 10) || 0));
-    const active = stream.offers.filter((entry) => entry.active);
-    const pinnedTotal = active.filter((entry) => entry.pinned).reduce((sum, entry) => sum + entry.share, 0);
-    const flexible = active.filter((entry) => !entry.pinned && entry.offer_id !== item.offer_id);
-    const remainder = Math.max(0, 100 - pinnedTotal - requested);
-    const weights = flexible.map((entry) => Math.max(0, Number(drafts[stream.id]?.[entry.offer_id] ?? entry.share)));
-    const total = weights.reduce((sum, share) => sum + share, 0);
-    const shares = weights.map((weight) => total ? Math.floor(weight * remainder / total) : 0);
-    let remaining = remainder - shares.reduce((sum, share) => sum + share, 0);
-    if (flexible.length && !total) shares.splice(0, shares.length, ...flexible.map((_, index) => Math.floor(remainder / flexible.length) + (index < remainder % flexible.length ? 1 : 0)));
-    else {
-      const order = weights.map((weight, index) => ({ index, fraction: total ? (weight * remainder / total) % 1 : 0 }))
-        .sort((a, b) => b.fraction - a.fraction);
-      for (const { index } of order.slice(0, remaining)) shares[index] += 1;
+    try {
+      updateStreamDraft(stream.id, setDraftOfferShare(
+        getDraftOffers(stream, drafts),
+        item.offer_id,
+        requested,
+      ));
+    } catch (error) {
+      notify(error.message, "error");
     }
-    const next = { ...drafts[stream.id], [item.offer_id]: requested };
-    flexible.forEach((entry, index) => { next[entry.offer_id] = shares[index]; });
-    setDrafts((current) => ({ ...current, [stream.id]: next }));
   };
 
-  const saveShares = async (stream) => {
-    const active = stream.offers.filter((item) => item.active);
-    const shares = active.map((item) => ({
-      offer_id: item.offer_id,
-      share: item.pinned ? item.share : Number(drafts[stream.id]?.[item.offer_id] ?? item.share),
-    }));
-    const total = shares.reduce((sum, item) => sum + item.share, 0);
+  const applyDraft = async (stream) => {
+    const offers = getDraftOffers(stream, drafts);
+    const active = offers.filter((item) => item.active);
+    const total = active.reduce((sum, item) => sum + item.share, 0);
     if (total !== 100) {
       notify(`Сумма должна быть 100%, сейчас ${total}%`, "error");
       return;
     }
     setSaving(true);
     try {
-      await api(`/campaigns/${view.campaign.id}/streams/${stream.id}/offers`, { method: "PUT", body: { shares } });
+      await api(`/campaigns/${view.campaign.id}/streams/${stream.id}/offers`, {
+        method: "PUT",
+        body: {
+          offers: offers.map((item) => ({
+            offer_id: item.offer_id,
+            active: item.active,
+            pinned: item.active && item.pinned,
+            share: item.active ? item.share : 0,
+            last_share: item.active ? item.share : item.last_share,
+          })),
+        },
+      });
       await loadView();
-      notify("Доли сохранены");
+      notify("Изменения применены");
     } catch (error) {
       notify(error.message, "error");
     } finally {
@@ -323,23 +418,52 @@ function App() {
     }
   };
 
-  const addOfferToStream = async (stream) => {
+  const resetDraft = (stream) => {
+    setDrafts((current) => ({
+      ...current,
+      [stream.id]: Object.fromEntries(stream.offers.map((item) => [item.offer_id, {
+        ...item,
+        share: item.active ? item.share : 0,
+        last_share: item.last_share ?? item.share,
+      }])),
+    }));
+  };
+
+  const addOfferToStream = (stream) => {
     if (!addOffer) return notify("Выберите оффер из списка", "error");
-    setSaving(true);
-    try {
-      await api(`/campaigns/${view.campaign.id}/streams/${stream.id}/offers`, {
-        method: "POST",
-        body: { offer_id: addOffer.id, share: addShare ? Number(addShare) : null },
-      });
-      setAddOffer(null);
-      setAddShare("");
-      await loadView();
-      notify("Оффер добавлен в поток");
-    } catch (error) {
-      notify(error.message, "error");
-    } finally {
-      setSaving(false);
+    const offers = getDraftOffers(stream, drafts);
+    const existing = offers.find((item) => item.offer_id === addOffer.id);
+    if (existing) {
+      if (existing.active) return notify("Этот оффер уже активен в потоке", "error");
+      if (!existing.available_in_keitaro) {
+        return notify(`Оффер ${existing.offer_id} сначала нужно восстановить в Keitaro`, "error");
+      }
+      return setOfferState(stream, existing, { active: true });
     }
+    const active = offers.filter((item) => item.active);
+    const pinnedTotal = active.filter((item) => item.pinned).reduce((sum, item) => sum + item.share, 0);
+    const available = 100 - pinnedTotal;
+    if (available < 1) return notify("Закреплённые офферы уже занимают 100%", "error");
+    const requested = addShare ? Number(addShare) : Math.max(1, Math.floor(available / (active.filter((item) => !item.pinned).length + 1)));
+    if (!Number.isInteger(requested) || requested < 1 || requested > available) {
+      return notify(`Доля нового оффера должна быть от 1 до ${available}%`, "error");
+    }
+    const stagedOffer = {
+      offer_id: addOffer.id,
+      name: addOffer.name || `#${addOffer.id}`,
+      share: requested,
+      last_share: requested,
+      active: true,
+      pinned: false,
+      available_in_keitaro: true,
+      clicks: 0,
+      unique_clicks: 0,
+      bots: 0,
+    };
+    updateStreamDraft(stream.id, setDraftOfferShare([...offers, stagedOffer], stagedOffer.offer_id, requested));
+    setAddOffer(null);
+    setAddShare("");
+    notify("Оффер добавлен в черновик. Нажмите «Применить изменения» для сохранения");
   };
 
   const createCampaign = async (event) => {
@@ -394,16 +518,37 @@ function App() {
                   placeholder="Найти кампанию по названию или ID"
                 />
               </label>
-              <select value={campaignId} onChange={(event) => setCampaignId(event.target.value)} aria-label="Кампания">
+              <select
+                value={campaignId}
+                onChange={(event) => {
+                  if (hasPendingDrafts && !window.confirm("Есть несохранённые изменения. Сбросить их и открыть другую кампанию?")) return;
+                  setCampaignId(event.target.value);
+                }}
+                aria-label="Кампания"
+              >
                 {campaigns.map((campaign) => <option value={campaign.id} key={campaign.id}>#{campaign.id} · {campaign.name}</option>)}
               </select>
-              <select value={interval} onChange={(event) => setInterval(event.target.value)} aria-label="Период статистики">
+              <select
+                value={interval}
+                onChange={(event) => {
+                  if (hasPendingDrafts && !window.confirm("Есть несохранённые изменения. Сбросить их и загрузить другой период?")) return;
+                  setInterval(event.target.value);
+                }}
+                aria-label="Период статистики"
+              >
                 <option value="today">Сегодня</option>
                 <option value="yesterday">Вчера</option>
                 <option value="last_7_days">Последние 7 дней</option>
                 <option value="all_time">Всё время</option>
               </select>
-              <button className="button secondary" onClick={() => loadView()} disabled={!campaignId || loading}>Обновить</button>
+              <button
+                className="button secondary"
+                onClick={() => {
+                  if (hasPendingDrafts && !window.confirm("Есть несохранённые изменения. Сбросить их и обновить данные?")) return;
+                  loadView();
+                }}
+                disabled={!campaignId || loading}
+              >Обновить</button>
             </section>
             {loading && !view ? <div className="loading-state"><span className="spinner" /> Загружаем данные Keitaro…</div> : null}
             {!loading && !campaigns.length && <div className="empty-state card"><div className="empty-icon">↗</div><h2>Пока нет кампаний</h2><p>Создайте кампанию — потоки и первый оффер настроятся автоматически.</p><button className="button primary" onClick={() => setPage("create")}>Создать кампанию</button></div>}
@@ -423,8 +568,13 @@ function App() {
                 {view.stats_error && <div className="inline-alert">Статистика недоступна: {view.stats_error}</div>}
                 <div className="section-title-row"><div><h2>Потоки кампании</h2><p>Закреплённая доля сохраняется, пока вы не открепите оффер.</p></div><span className="period-label">Период: {interval === "today" ? "сегодня" : interval === "yesterday" ? "вчера" : interval === "last_7_days" ? "7 дней" : "всё время"}</span></div>
                 {view.streams.map((stream) => {
-                  const draftTotal = stream.offers.filter((item) => item.active)
-                    .reduce((sum, item) => sum + (item.pinned ? item.share : Number(drafts[stream.id]?.[item.offer_id] ?? item.share)), 0);
+                  const streamOffers = getDraftOffers(stream, drafts);
+                  const draftTotal = streamOffers.filter((item) => item.active)
+                    .reduce((sum, item) => sum + item.share, 0);
+                  const streamDirty = streamOffers.some((item) => draftOfferChanged(
+                    stream.offers.find((original) => original.offer_id === item.offer_id),
+                    item,
+                  ));
                   return (
                     <section className="stream-card card" key={stream.id}>
                       <div className="stream-heading">
@@ -432,7 +582,7 @@ function App() {
                           <span className="stream-icon">↗</span>
                           <div><h3>{stream.name || `Поток ${stream.id}`}</h3><span>Поток #{stream.id} <span className="divider">/</span> {stream.schema}</span></div>
                         </div>
-                        <span className="stream-badge">{stream.editable ? `${stream.offers.filter((item) => item.active).length} активных` : "Без офферов"}</span>
+                        <span className="stream-badge">{stream.editable ? `${streamOffers.filter((item) => item.active).length} активных` : "Без офферов"}</span>
                       </div>
                       {stream.filters.length > 0 && <div className="stream-filter">Фильтры: {stream.filters.map((filter) => `${filter.name} ${filter.mode} ${(filter.payload || []).join(", ")}`).join("; ")}</div>}
                       {stream.share_warning && <div className="inline-alert stream-alert">{stream.share_warning}</div>}
@@ -444,31 +594,41 @@ function App() {
                             <table className="offers-table">
                               <thead><tr><th>ОФФЕР</th><th>ДОЛЯ</th><th>КЛИКИ</th><th>УНИКАЛЬНЫЕ</th><th>БОТЫ</th><th><span className="sr-only">Действия</span></th></tr></thead>
                               <tbody>
-                                {stream.offers.map((item) => (
+                                {streamOffers.map((item) => (
                                   <OfferRow
                                     key={item.offer_id}
-                                    offer={item.active ? { ...item, share: drafts[stream.id]?.[item.offer_id] ?? item.share } : item}
+                                    offer={item}
+                                    dirty={draftOfferChanged(
+                                      stream.offers.find((original) => original.offer_id === item.offer_id),
+                                      item,
+                                    )}
                                     onActive={(selected) => setOfferState(stream, selected, { active: !selected.active })}
                                     onPin={(selected) => setOfferState(stream, selected, { pinned: !selected.pinned })}
                                     onShare={(selected, value) => redistributeDraft(stream, selected, value)}
                                     saving={saving}
                                   />
                                 ))}
-                                {!stream.offers.length && <tr><td colSpan="6" className="empty-row">Добавьте первый оффер, чтобы распределять трафик.</td></tr>}
+                                {!streamOffers.length && <tr><td colSpan="6" className="empty-row">Добавьте первый оффер, чтобы распределять трафик.</td></tr>}
                               </tbody>
                               <tfoot><tr><td>ИТОГО АКТИВНЫЕ</td><td className={draftTotal === 100 ? "total-ok" : "total-error"}>{draftTotal}%</td><td>{stream.totals.clicks.toLocaleString("ru-RU")}</td><td>{stream.totals.unique_clicks.toLocaleString("ru-RU")}</td><td>{stream.totals.bots.toLocaleString("ru-RU")}</td><td /></tr></tfoot>
                             </table>
                           </div>
                           <div className="stream-footer">
-                            <div className="distribution-hint"><span className="pin-example">◆</span> Закрепите долю, чтобы не менять её при перераспределении</div>
-                            <button className="button secondary save-button" disabled={saving || draftTotal !== 100} onClick={() => saveShares(stream)}>Сохранить доли</button>
+                            <div className="distribution-hint">
+                              <span className="pin-example">◆</span> Закрепите долю, чтобы не менять её при перераспределении.
+                              {streamDirty && <strong className="pending-label"> Есть несохранённые изменения</strong>}
+                            </div>
+                            <div className="stream-actions">
+                              <button className="button secondary reset-button" disabled={saving || !streamDirty} onClick={() => resetDraft(stream)}>Сбросить</button>
+                              <button className="button primary save-button" disabled={saving || !streamDirty || draftTotal !== 100} onClick={() => applyDraft(stream)}>Применить изменения</button>
+                            </div>
                           </div>
                           <div className="add-offer-row">
                             <div className="add-picker">                            <OfferPicker value={addOffer} onSelect={setAddOffer} placeholder="Добавить оффер по названию или ID" onError={notify} /></div>
                             <label className="add-share"><input type="number" min="1" max="100" value={addShare} onChange={(event) => setAddShare(event.target.value)} placeholder="Авто" aria-label="Доля нового оффера" /><span>%</span></label>
-                            <button className="button primary" disabled={saving || !addOffer} onClick={() => addOfferToStream(stream)}>Добавить оффер</button>
+                            <button className="button primary" disabled={saving || !addOffer} onClick={() => addOfferToStream(stream)}>Добавить в черновик</button>
                           </div>
-                          {stream.offers.some((item) => !item.active && !item.available_in_keitaro) && (
+                          {streamOffers.some((item) => !item.active && !item.available_in_keitaro) && (
                             <div className="missing-note">Офферы, удалённые из Keitaro, сохранены здесь. Они останутся неактивными; включение доступно после восстановления оффера в Keitaro.</div>
                           )}
                         </>
@@ -493,7 +653,7 @@ function App() {
             <section className="create-card card">
               <div className="card-title"><div><h2>Параметры кампании</h2><p>Поля со звёздочкой обязательны</p></div><span className="required-note">* обязательное поле</span></div>
               <form onSubmit={createCampaign}>
-                <label className="form-field"><span>Название кампании <b>*</b></span><input required maxLength="200" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Например, Autumn AU test" />{meta?.defaults.name_prefix && <small>Префикс <code>{meta.defaults.name_prefix}</code> добавится автоматически</small>}</label>
+                <label className="form-field"><span>Название кампании <b>*</b></span><input required maxLength="200" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Например, Autumn AU test" />{meta?.defaults.name_prefix && <small>Префикс <code>{meta.defaults.name_prefix}</code> и суффикс <code>_company</code> добавятся автоматически; фамилия из префикса не будет повторена.</small>}</label>
                 <label className="form-field"><span>Гео <b>*</b></span><input required minLength="2" value={form.geo} onChange={(event) => setForm({ ...form, geo: event.target.value })} placeholder="AU, MX, RO" /><small>Двухбуквенные коды стран через запятую</small></label>
                 <label className="form-field"><span>Стартовый оффер <b>*</b></span><OfferPicker value={offer} onSelect={setOffer} placeholder="Найдите оффер в Keitaro" onError={notify} /></label>
                 <details className="advanced-settings">

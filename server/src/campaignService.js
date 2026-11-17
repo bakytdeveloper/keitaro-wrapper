@@ -8,6 +8,45 @@ const asArray = (value) => Array.isArray(value) ? value : [];
 const asNumber = (value) => Number(value);
 const normalizedName = (value) => String(value || "").trim().toLowerCase();
 const cleanDomain = (value) => String(value || "").trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "").toLowerCase();
+const isOfferStream = (schema) => schema === "landings" || schema === "landings_offers";
+
+function formatCampaignName(value, prefix) {
+  let suffix = String(value || "").trim();
+  const configuredPrefix = String(prefix || "").trim();
+  const prefixCore = configuredPrefix.replace(/[_\s-]+$/, "");
+
+  if (configuredPrefix && suffix.toLowerCase().startsWith(configuredPrefix.toLowerCase())) {
+    suffix = suffix.slice(configuredPrefix.length).replace(/^[\s_-]+/, "");
+  } else if (prefixCore && suffix.toLowerCase() === prefixCore.toLowerCase()) {
+    suffix = "";
+  }
+
+  const repeatedPrefixPart = prefixCore.split(/[_\s-]+/).at(-1);
+  if (repeatedPrefixPart && suffix.toLowerCase().startsWith(repeatedPrefixPart.toLowerCase())) {
+    suffix = suffix.slice(repeatedPrefixPart.length).replace(/^[\s_-]+/, "");
+  }
+  suffix = suffix.replace(/(?:[_\s-]+company)$/i, "").trim();
+  if (suffix.toLowerCase() === "company") suffix = "";
+
+  const namePrefix = configuredPrefix
+    ? (configuredPrefix.endsWith("_") ? configuredPrefix : `${configuredPrefix}_`)
+    : "";
+  return `${namePrefix}${suffix ? `${suffix}_` : ""}company`;
+}
+
+function uniqueCampaignAlias(name, campaigns) {
+  const base = String(name)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "campaign";
+  const usedAliases = new Set(campaigns.map((campaign) => String(campaign.alias || "").toLowerCase()));
+  let alias = base;
+  let suffix = 2;
+  while (usedAliases.has(alias)) alias = `${base}-${suffix++}`;
+  return alias;
+}
 
 export class CampaignService {
   constructor(client, settings, models = {}) {
@@ -68,10 +107,10 @@ export class CampaignService {
     } catch (error) {
       throw new ServiceError(400, error.message);
     }
-    name = String(name || "").trim();
-    if (!name) throw new ServiceError(400, "Название кампании не может быть пустым");
+    const enteredName = String(name || "").trim();
+    if (!enteredName) throw new ServiceError(400, "Название кампании не может быть пустым");
     const prefix = this.settings.namePrefix;
-    if (prefix && !name.startsWith(prefix)) name = prefix + name;
+    name = formatCampaignName(enteredName, prefix);
 
     const defaults = (await this.defaults()).defaults;
     domainId ||= defaults.domain_id;
@@ -93,6 +132,7 @@ export class CampaignService {
     }
     const campaign = await this.client.createCampaign({
       name,
+      alias: uniqueCampaignAlias(name, existing),
       type: "position",
       state: "active",
       cookies_ttl: 24,
@@ -127,7 +167,7 @@ export class CampaignService {
         name: `Offer ${offerId}`,
         position: 2,
         state: "active",
-        schema: "landings_offers",
+        schema: "landings",
         action_type: "http",
         collect_clicks: true,
         filter_or: false,
@@ -141,7 +181,14 @@ export class CampaignService {
       } catch (rollbackError) {
         rollbackMessage = ` Не удалось откатить кампанию ${campaign.id}: ${rollbackError.message}`;
       }
-      throw new ServiceError(502, `Не удалось создать потоки кампании ${campaign.id}.${rollbackMessage} ${error.message}`);
+      const details = error instanceof KeitaroError
+        ? { keitaro_status: error.status, path: error.path, keitaro_detail: error.detail }
+        : { operation: "create_streams" };
+      throw new ServiceError(
+        502,
+        `Не удалось создать потоки кампании ${campaign.id}.${rollbackMessage} ${error.message}`,
+        details,
+      );
     }
 
     await this.models.CampaignRecord.create({
@@ -329,7 +376,7 @@ export class CampaignService {
     const catalog = new Map(asArray(liveOffers).map((offer) => [asNumber(offer.id), offer]));
     const views = [];
     for (const stream of asArray(streams).sort((a, b) => (a.position || 0) - (b.position || 0))) {
-      const links = stream.schema === "landings_offers"
+      const links = isOfferStream(stream.schema)
         ? await this._syncStream(campaignId, stream, catalog)
         : [];
       const shareWarning = links.shareWarning || null;
@@ -359,7 +406,7 @@ export class CampaignService {
         action_payload: stream.action_payload,
         state: stream.state,
         filters: stream.filters || [],
-        editable: stream.schema === "landings_offers",
+        editable: isOfferStream(stream.schema),
         share_warning: shareWarning,
         offers,
         totals: {
@@ -383,7 +430,7 @@ export class CampaignService {
     if (asNumber(stream.campaign_id) !== asNumber(campaignId)) {
       throw new ServiceError(404, `Поток ${streamId} не принадлежит кампании ${campaignId}`);
     }
-    if (stream.schema !== "landings_offers") {
+    if (!isOfferStream(stream.schema)) {
       throw new ServiceError(400, "В этом потоке нет офферов — редактировать нечего");
     }
     return stream;
@@ -550,6 +597,77 @@ export class CampaignService {
     if (sum !== 100) throw new ServiceError(400, `Сумма долей должна быть 100%, сейчас ${sum}%`);
     for (const offer of active) offer.lastShare = offer.share;
     return this._saveOffers(campaignId, streamId, offers, "shares", null);
+  }
+
+  async setOffers(campaignId, streamId, updates) {
+    const stream = await this._offerStream(campaignId, streamId);
+    const liveOffers = asArray(await this.client.listOffers());
+    const catalog = new Map(liveOffers.map((offer) => [asNumber(offer.id), offer]));
+    const current = await this._syncStream(campaignId, stream, catalog);
+    const offersById = new Map(current.map((offer) => [asNumber(offer.offerId), offer]));
+    const updatesById = new Map(updates.map((item) => [asNumber(item.offerId), item]));
+
+    for (const offerId of offersById.keys()) {
+      if (!updatesById.has(offerId)) {
+        throw new ServiceError(400, `Изменения должны включать оффер ${offerId}; офферы нельзя удалять из приложения`);
+      }
+    }
+
+    const offers = [];
+    for (const update of updates) {
+      const offerId = asNumber(update.offerId);
+      const liveOffer = catalog.get(offerId);
+      if (typeof update.active !== "boolean" || typeof update.pinned !== "boolean") {
+        throw new ServiceError(400, `Для оффера ${offerId} нужны значения active и pinned`);
+      }
+      if (!Number.isInteger(update.share) || update.share < 0 || update.share > 100) {
+        throw new ServiceError(400, `Доля оффера ${offerId} должна быть целым числом от 0 до 100`);
+      }
+      if (update.active && !liveOffer) {
+        throw new ServiceError(409, `Оффер ${offerId} отсутствует в Keitaro и не может быть активирован`);
+      }
+
+      const existing = offersById.get(offerId);
+      if (!existing && !liveOffer) {
+        throw new ServiceError(404, `Оффер ${offerId} не найден в Keitaro`);
+      }
+      const offer = existing || {
+        campaignId,
+        streamId,
+        offerId,
+        name: liveOffer.name || `#${offerId}`,
+        share: 0,
+        lastShare: 0,
+        active: false,
+        pinned: false,
+      };
+      if (existing?.active && existing.pinned && update.active && update.pinned && update.share !== existing.share) {
+        throw new ServiceError(409, `Сначала открепите оффер ${offerId}, чтобы изменить его долю`);
+      }
+
+      if (update.active) {
+        offer.active = true;
+        offer.pinned = update.pinned;
+        offer.share = update.share;
+        offer.lastShare = update.share;
+      } else {
+        if (offer.active) offer.lastShare = offer.share || offer.lastShare;
+        else if (Number.isInteger(update.lastShare) && update.lastShare >= 0 && update.lastShare <= 100) {
+          offer.lastShare = update.lastShare;
+        }
+        offer.active = false;
+        offer.pinned = false;
+        offer.share = 0;
+      }
+      if (liveOffer?.name) offer.name = liveOffer.name;
+      offers.push(offer);
+    }
+
+    const active = offers.filter((offer) => offer.active);
+    if (!active.length) throw new ServiceError(409, "Нельзя деактивировать последний активный оффер потока");
+    const total = active.reduce((sum, offer) => sum + offer.share, 0);
+    if (total !== 100) throw new ServiceError(400, `Сумма долей должна быть 100%, сейчас ${total}%`);
+    return this._saveOffers(campaignId, streamId, offers, "update", null);
   }
 
   async setOfferShare(campaignId, streamId, offerId, share) {

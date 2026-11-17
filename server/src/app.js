@@ -95,8 +95,32 @@ export function createApp(getService = createService) {
     throw new ServiceError(400, "Укажите active, pinned или целое значение share");
   });
   api.put("/campaigns/:campaignId/streams/:streamId/offers", async (req, res) => {
+    const campaignId = numericId(req.params.campaignId, "campaign_id");
+    const streamId = numericId(req.params.streamId, "stream_id");
+    if (Array.isArray(req.body?.offers)) {
+      const updates = req.body.offers.map((item) => {
+        const offerId = numericId(item?.offer_id, "offer_id");
+        const share = Number(item.share);
+        const lastShare = item.last_share == null ? undefined : Number(item.last_share);
+        if (!Number.isInteger(share)) throw new ServiceError(400, `Некорректная доля для оффера ${offerId}`);
+        if (lastShare !== undefined && !Number.isInteger(lastShare)) {
+          throw new ServiceError(400, `Некорректная сохранённая доля для оффера ${offerId}`);
+        }
+        return {
+          offerId,
+          share,
+          lastShare,
+          active: item.active,
+          pinned: item.pinned,
+        };
+      });
+      if (new Set(updates.map((item) => item.offerId)).size !== updates.length) {
+        throw new ServiceError(400, "Оффер передан повторно");
+      }
+      return res.json(await req.service.setOffers(campaignId, streamId, updates));
+    }
     const shares = req.body?.shares;
-    if (!Array.isArray(shares)) throw new ServiceError(400, "Поле shares должно быть массивом");
+    if (!Array.isArray(shares)) throw new ServiceError(400, "Передайте массив offers для применения изменений");
     const shareMap = new Map();
     for (const item of shares) {
       const id = numericId(item?.offer_id, "offer_id");
@@ -104,8 +128,8 @@ export function createApp(getService = createService) {
       shareMap.set(id, Number(item.share));
     }
     res.json(await req.service.setShares(
-      numericId(req.params.campaignId, "campaign_id"),
-      numericId(req.params.streamId, "stream_id"),
+      campaignId,
+      streamId,
       shareMap,
     ));
   });
@@ -119,11 +143,14 @@ export function createApp(getService = createService) {
     app.use(express.static(clientDist));
     app.get(/.*/, (_req, res) => res.sendFile(resolve(clientDist, "index.html")));
   }
-  app.use((error, _req, res, _next) => {
+  app.use((error, req, res, _next) => {
     if (error?.type === "entity.parse.failed") {
       return res.status(400).json({ detail: "Некорректный JSON в теле запроса" });
     }
-    if (error instanceof ServiceError) return res.status(error.status).json({ detail: error.message });
+    if (error instanceof ServiceError) {
+      if (error.status >= 500) console.error(`[${req.method} ${req.originalUrl}] ${error.message}`);
+      return res.status(error.status).json({ detail: error.message, ...error.details });
+    }
     if (error instanceof KeitaroError) {
       return res.status(502).json({
         detail: `Keitaro API: ${error.detail}`,
