@@ -39,12 +39,16 @@ function useNotice() {
   return [notice, show, clear];
 }
 
-function OfferPicker({ value, onSelect, placeholder, onError }) {
+function OfferPicker({ value, onSelect, placeholder, onError, onOpenChange }) {
   const [query, setQuery] = useState("");
   const [options, setOptions] = useState([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const timer = useRef();
+  const updateOpen = (nextOpen) => {
+    setOpen(nextOpen);
+    onOpenChange?.(nextOpen);
+  };
 
   useEffect(() => {
     if (!open) return undefined;
@@ -70,10 +74,10 @@ function OfferPicker({ value, onSelect, placeholder, onError }) {
         onChange={(event) => {
           onSelect(null);
           setQuery(event.target.value);
-          setOpen(true);
+          updateOpen(true);
         }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 140)}
+        onFocus={() => updateOpen(true)}
+        onBlur={() => setTimeout(() => updateOpen(false), 140)}
         placeholder={placeholder}
         autoComplete="off"
         aria-label={placeholder}
@@ -90,7 +94,7 @@ function OfferPicker({ value, onSelect, placeholder, onError }) {
               onClick={() => {
                 onSelect(offer);
                 setQuery("");
-                setOpen(false);
+                updateOpen(false);
               }}
             >
               <span className="offer-id">#{offer.id}</span>
@@ -288,7 +292,9 @@ function App() {
   const [created, setCreated] = useState(null);
   const [addOffer, setAddOffer] = useState(null);
   const [addShare, setAddShare] = useState("");
+  const [openPickerStreamId, setOpenPickerStreamId] = useState(null);
   const [drafts, setDrafts] = useState({});
+  const draftsRef = useRef(drafts);
   const hasPendingDrafts = useMemo(() => view?.streams.some((stream) => (
     getDraftOffers(stream, drafts).some((item) => draftOfferChanged(
       stream.offers.find((original) => original.offer_id === item.offer_id),
@@ -344,7 +350,9 @@ function App() {
     try {
       const data = await api(`/campaigns/${id}`);
       setView(data);
-      setDrafts(createInitialDrafts(data));
+      const initialDrafts = createInitialDrafts(data);
+      draftsRef.current = initialDrafts;
+      setDrafts(initialDrafts);
     } catch (error) {
       notify(error.message, "error");
     } finally {
@@ -371,14 +379,16 @@ function App() {
   }, [page, campaignId, loadView]);
 
   const updateStreamDraft = (streamId, offers) => {
-    setDrafts((current) => ({
-      ...current,
+    const nextDrafts = {
+      ...draftsRef.current,
       [streamId]: Object.fromEntries(offers.map((item) => [item.offer_id, item])),
-    }));
+    };
+    draftsRef.current = nextDrafts;
+    setDrafts(nextDrafts);
   };
 
   const setOfferState = (stream, item, patch) => {
-    const offers = getDraftOffers(stream, drafts);
+    const offers = getDraftOffers(stream, draftsRef.current);
     const target = offers.find((entry) => entry.offer_id === item.offer_id);
     if (!target) return;
     if (typeof patch.active === "boolean") {
@@ -419,14 +429,14 @@ function App() {
   const updateShareDraft = (stream, item, value) => {
     const parsed = Number.parseInt(value, 10);
     const requested = Number.isFinite(parsed) ? Math.max(0, Math.min(100, parsed)) : 0;
-    const offers = getDraftOffers(stream, drafts).map((entry) => (
+    const offers = getDraftOffers(stream, draftsRef.current).map((entry) => (
       entry.offer_id === item.offer_id ? { ...entry, share: requested } : entry
     ));
     updateStreamDraft(stream.id, offers);
   };
 
   const redistributeDraft = (stream, item) => {
-    const offers = getDraftOffers(stream, drafts);
+    const offers = getDraftOffers(stream, draftsRef.current);
     const target = offers.find((entry) => entry.offer_id === item.offer_id);
     if (!target) return;
     try {
@@ -441,7 +451,7 @@ function App() {
   };
 
   const applyDraft = async (stream) => {
-    const offers = getDraftOffers(stream, drafts);
+    const offers = getDraftOffers(stream, draftsRef.current);
     const active = offers.filter((item) => item.active);
     const total = active.reduce((sum, item) => sum + item.share, 0);
     if (total !== 100) {
@@ -472,19 +482,21 @@ function App() {
   };
 
   const resetDraft = (stream) => {
-    setDrafts((current) => ({
-      ...current,
+    const nextDrafts = {
+      ...draftsRef.current,
       [stream.id]: Object.fromEntries(stream.offers.map((item) => [item.offer_id, {
         ...item,
         share: item.active ? item.share : 0,
         last_share: item.last_share ?? item.share,
       }])),
-    }));
+    };
+    draftsRef.current = nextDrafts;
+    setDrafts(nextDrafts);
   };
 
   const addOfferToStream = (stream) => {
     if (!addOffer) return notify("Выберите оффер из списка", "error");
-    const offers = getDraftOffers(stream, drafts);
+    const offers = getDraftOffers(stream, draftsRef.current);
     const existing = offers.find((item) => item.offer_id === addOffer.id);
     if (existing) {
       if (existing.active) return notify("Этот оффер уже активен в потоке", "error");
@@ -624,7 +636,7 @@ function App() {
                     <p>Закреплённая доля сохраняется, пока вы не открепите оффер.</p>
                   </div>
                 </div>
-                {view.streams.map((stream) => {
+                {view.streams.map((stream, streamIndex) => {
                   const streamOffers = getDraftOffers(stream, drafts);
                   const draftTotal = streamOffers.filter((item) => item.active)
                     .reduce((sum, item) => sum + item.share, 0);
@@ -633,8 +645,10 @@ function App() {
                     item,
                   ));
                   const filterDescription = formatStreamFilters(stream.filters);
+                  const reservePickerSpace = streamIndex === view.streams.length - 1
+                    && openPickerStreamId === stream.id;
                   return (
-                    <section className="stream-card card" key={stream.id}>
+                    <section className={`stream-card card${reservePickerSpace ? " picker-space-reserved" : ""}`} key={stream.id}>
                       <div className="stream-heading">
                         <div className="stream-title-wrap">
                           <span className="stream-icon">↗</span>
@@ -686,7 +700,7 @@ function App() {
                             </table>
                           </div>
                           <div className="add-offer-row">
-                            <div className="add-picker">                            <OfferPicker value={addOffer} onSelect={setAddOffer} placeholder="Добавить оффер по названию или ID" onError={notify} /></div>
+                            <div className="add-picker"><OfferPicker value={addOffer} onSelect={setAddOffer} placeholder="Добавить оффер по названию или ID" onError={notify} onOpenChange={(isOpen) => setOpenPickerStreamId(isOpen ? stream.id : null)} /></div>
                             <label className="add-share"><input type="number" min="1" max="100" value={addShare} onChange={(event) => setAddShare(event.target.value)} placeholder="Авто" aria-label="Доля нового оффера" /><span>%</span></label>
                             <button className="button primary" disabled={saving || !addOffer} onClick={() => addOfferToStream(stream)}>Добавить в черновик</button>
                           </div>

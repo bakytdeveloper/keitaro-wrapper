@@ -68,6 +68,7 @@ h1, h2, h3, p { margin-top: 0; }
 .section-title-row h2 { margin: 0 0 4px; font: 700 18px Manrope, sans-serif; }
 .section-title-row p { margin: 0; color: #8993a5; font-size: 13px; }
 .stream-card { overflow: visible; margin-bottom: 15px; }
+.stream-card.picker-space-reserved { margin-bottom: 260px; }
 .stream-heading { display: flex; align-items: center; padding: 15px 19px; border-bottom: 1px solid #eff1f5; }
 .stream-title-wrap { display: flex; align-items: center; gap: 11px; flex: 1; }
 .stream-icon { width: 31px; height: 31px; display: grid; place-items: center; border-radius: 8px; color: #5181c8; background: #eef5fc; font-size: 19px; }
