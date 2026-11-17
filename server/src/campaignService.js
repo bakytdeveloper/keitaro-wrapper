@@ -107,7 +107,7 @@ export class CampaignService {
       ["источник", sourceId],
     ].filter(([, value]) => !value).map(([label]) => label);
     if (missing.length) {
-      throw new ServiceError(400, `Не выбраны: ${missing.join(", ")}. Задайте настройки по умолчанию или выберите значения в форме.`);
+      throw new ServiceError(400, `Не настроены обязательные параметры (${missing.join(", ")}). Укажите DEFAULT_DOMAIN, DEFAULT_GROUP_NAME и DEFAULT_SOURCE_NAME в .env и перезапустите сервер.`);
     }
 
     const offer = await this._getOffer(offerId);
