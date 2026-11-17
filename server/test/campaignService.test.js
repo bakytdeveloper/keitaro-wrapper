@@ -77,7 +77,7 @@ function setup({ catalog = [1, 2, 3], links = [], schema = "landings_offers", re
   return { service, client, stream, model };
 }
 
-test("campaign names avoid repeating the prefix surname and append the campaign suffix", async () => {
+test("campaign names use the fixed test prefix and append the campaign suffix", async () => {
   let campaignPayload;
   const createdStreams = [];
   const service = new CampaignService({
@@ -86,7 +86,7 @@ test("campaign names avoid repeating the prefix surname and append the campaign 
     async listTrafficSources() { return [{ id: 3, name: "FORTESTS" }]; },
     async listOffers() { return [{ id: 9, name: "Example offer" }]; },
     async listCampaigns() {
-      return [{ id: 4, name: "Another campaign", alias: "test-kashkarbaev-campaign" }];
+      return [{ id: 4, name: "Another campaign", alias: "test-bakyt-campaign" }];
     },
     async createCampaign(payload) {
       campaignPayload = payload;
@@ -107,9 +107,9 @@ test("campaign names avoid repeating the prefix surname and append the campaign 
     OfferChange: fakeModel(),
   });
 
-  const result = await service.createCampaign("kashkarbaev", "AU", 9, 1, 2, 3);
-  assert.equal(campaignPayload.name, "test_kashkarbaev_campaign");
-  assert.equal(campaignPayload.alias, "test-kashkarbaev-campaign-2");
+  const result = await service.createCampaign("bakyt", "AU", 9, 1, 2, 3);
+  assert.equal(campaignPayload.name, "test_bakyt_campaign");
+  assert.equal(campaignPayload.alias, "test-bakyt-campaign-2");
   assert.equal(result.alias, campaignPayload.alias);
   assert.equal(createdStreams.length, 2);
   assert.deepEqual(createdStreams.map((stream) => stream.schema), ["action", "landings"]);

@@ -715,15 +715,15 @@ function App() {
             <section className="create-card card">
               <div className="card-title"><div><h2>Параметры кампании</h2><p>Поля со звёздочкой обязательны</p></div><span className="required-note">* обязательное поле</span></div>
               <form onSubmit={createCampaign}>
-                <label className="form-field"><span>Название кампании <b>*</b></span><input required maxLength="200" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Например, Autumn AU test" />{meta?.defaults.name_prefix && <small>Префикс <code>{meta.defaults.name_prefix}</code> и суффикс <code>_campaign</code> добавятся автоматически; фамилия из префикса не будет повторена.</small>}</label>
+                <label className="form-field"><span>Название кампании <b>*</b></span><input required maxLength="200" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Например, Autumn AU test" /><small>Префикс <code>test_</code> и суффикс <code>_campaign</code> добавятся автоматически.</small></label>
                 <label className="form-field"><span>Гео <b>*</b></span><input required minLength="2" value={form.geo} onChange={(event) => setForm({ ...form, geo: event.target.value })} placeholder="AU, MX, RO" /><small>Двухбуквенные коды стран через запятую</small></label>
                 <label className="form-field"><span>Стартовый оффер <b>*</b></span><OfferPicker value={offer} onSelect={setOffer} placeholder="Найдите оффер в Keitaro" onError={notify} /></label>
                 <details className="advanced-settings">
-                  <summary>Дополнительные настройки <span>Домен, группа и источник</span></summary>
+                  <summary>Дополнительные настройки <span>Домен, группа и источник — только просмотр</span></summary>
                   <div className="select-grid">
-                    <label className="form-field"><span>Домен</span><select value={form.domain_id} onChange={(event) => setForm({ ...form, domain_id: event.target.value })}><option value="">Выбрать домен</option>{meta?.domains.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-                    <label className="form-field"><span>Группа</span><select value={form.group_id} onChange={(event) => setForm({ ...form, group_id: event.target.value })}><option value="">Выбрать группу</option>{meta?.groups.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-                    <label className="form-field"><span>Источник</span><select value={form.source_id} onChange={(event) => setForm({ ...form, source_id: event.target.value })}><option value="">Выбрать источник</option>{meta?.sources.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                    <label className="form-field"><span>Домен</span><select value={form.domain_id} disabled><option value="">Выбрать домен</option>{meta?.domains.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                    <label className="form-field"><span>Группа</span><select value={form.group_id} disabled><option value="">Выбрать группу</option>{meta?.groups.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                    <label className="form-field"><span>Источник</span><select value={form.source_id} disabled><option value="">Выбрать источник</option>{meta?.sources.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
                   </div>
                 </details>
                 <button className="button primary create-submit" type="submit" disabled={saving}>{saving ? "Создаём кампанию…" : "Создать кампанию"} <span>→</span></button>

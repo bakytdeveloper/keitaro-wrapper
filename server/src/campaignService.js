@@ -9,29 +9,15 @@ const asNumber = (value) => Number(value);
 const normalizedName = (value) => String(value || "").trim().toLowerCase();
 const cleanDomain = (value) => String(value || "").trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "").toLowerCase();
 const isOfferStream = (schema) => schema === "landings" || schema === "landings_offers";
+const CAMPAIGN_NAME_PREFIX = "test_";
 
-function formatCampaignName(value, prefix) {
+function formatCampaignName(value) {
   let suffix = String(value || "").trim();
-  const configuredPrefix = String(prefix || "").trim();
-  const prefixCore = configuredPrefix.replace(/[_\s-]+$/, "");
-
-  if (configuredPrefix && suffix.toLowerCase().startsWith(configuredPrefix.toLowerCase())) {
-    suffix = suffix.slice(configuredPrefix.length).replace(/^[\s_-]+/, "");
-  } else if (prefixCore && suffix.toLowerCase() === prefixCore.toLowerCase()) {
-    suffix = "";
-  }
-
-  const repeatedPrefixPart = prefixCore.split(/[_\s-]+/).at(-1);
-  if (repeatedPrefixPart && suffix.toLowerCase().startsWith(repeatedPrefixPart.toLowerCase())) {
-    suffix = suffix.slice(repeatedPrefixPart.length).replace(/^[\s_-]+/, "");
-  }
+  suffix = suffix.replace(/^test(?:[_\s-]+|$)/i, "");
   suffix = suffix.replace(/(?:[_\s-]+(?:company|campaign))$/i, "").trim();
   if (suffix.toLowerCase() === "company" || suffix.toLowerCase() === "campaign") suffix = "";
 
-  const namePrefix = configuredPrefix
-    ? (configuredPrefix.endsWith("_") ? configuredPrefix : `${configuredPrefix}_`)
-    : "";
-  return `${namePrefix}${suffix ? `${suffix}_` : ""}campaign`;
+  return `${CAMPAIGN_NAME_PREFIX}${suffix ? `${suffix}_` : ""}campaign`;
 }
 
 function uniqueCampaignAlias(name, campaigns) {
@@ -79,7 +65,7 @@ export class CampaignService {
         domain_id: domain?.id ?? null,
         group_id: group?.id ?? null,
         source_id: source?.id ?? null,
-        name_prefix: this.settings.namePrefix,
+        name_prefix: CAMPAIGN_NAME_PREFIX,
       },
     };
   }
@@ -109,8 +95,7 @@ export class CampaignService {
     }
     const enteredName = String(name || "").trim();
     if (!enteredName) throw new ServiceError(400, "Название кампании не может быть пустым");
-    const prefix = this.settings.namePrefix;
-    name = formatCampaignName(enteredName, prefix);
+    name = formatCampaignName(enteredName);
 
     const defaults = (await this.defaults()).defaults;
     domainId ||= defaults.domain_id;

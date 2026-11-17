@@ -10,7 +10,6 @@ export const config = {
   keitaroBaseUrl: process.env.KEITARO_BASE_URL || "",
   keitaroApiKey: process.env.KEITARO_API_KEY || "",
   keitaroTimeout: Number(process.env.KEITARO_TIMEOUT || 20_000),
-  namePrefix: process.env.NAME_PREFIX || "test_kashkarbaev_",
   defaultGroupName: process.env.DEFAULT_GROUP_NAME || "FORTESTS",
   defaultSourceName: process.env.DEFAULT_SOURCE_NAME || "FORTESTS",
   defaultDomain: process.env.DEFAULT_DOMAIN || "",
