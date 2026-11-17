@@ -1,0 +1,10 @@
+.env
+*.db
+__pycache__/
+.venv/
+.pytest_cache/
+node_modules/
+client/dist/
+coverage/
+npm-debug.log*
+.idea/

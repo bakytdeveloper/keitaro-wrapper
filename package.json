@@ -1,0 +1,20 @@
+{
+  "name": "keitaro-wrapper",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c blue,green \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "npm --prefix server run dev",
+    "dev:client": "npm --prefix client run dev",
+    "build": "npm --prefix client run build",
+    "start": "npm --prefix server start",
+    "test": "npm --prefix server test",
+    "import:sqlite": "node server/scripts/import-sqlite.js"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
