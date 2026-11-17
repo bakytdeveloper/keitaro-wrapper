@@ -39,7 +39,7 @@ function fakeModel(initial = []) {
   };
 }
 
-function setup({ catalog = [1, 2, 3], links = [], schema = "landings_offers" } = {}) {
+function setup({ catalog = [1, 2, 3], links = [], schema = "landings_offers", remoteOffers } = {}) {
   const model = fakeModel(links.map((link) => ({
     campaignId: 7,
     streamId: 11,
@@ -55,7 +55,11 @@ function setup({ catalog = [1, 2, 3], links = [], schema = "landings_offers" } =
     schema,
     position: 1,
     name: "Offers",
-    offers: [{ offer_id: 1, share: 40, state: "active" }, { offer_id: 2, share: 30, state: "active" }, { offer_id: 3, share: 30, state: "active" }],
+    offers: remoteOffers || [
+      { offer_id: 1, share: 40, state: "active" },
+      { offer_id: 2, share: 30, state: "active" },
+      { offer_id: 3, share: 30, state: "active" },
+    ],
   };
   const client = {
     async listOffers() { return catalog.map((id) => ({ id, name: `Offer ${id}` })); },
@@ -169,6 +173,54 @@ test("editing another offer's share leaves a pinned percentage unchanged", async
   ]);
 });
 
+test("editing one offer splits the remaining flexible shares equally", async () => {
+  const { service } = setup({
+    catalog: [1, 2, 3, 4],
+    remoteOffers: [
+      { offer_id: 1, share: 20, state: "active" },
+      { offer_id: 2, share: 30, state: "active" },
+      { offer_id: 3, share: 40, state: "active" },
+      { offer_id: 4, share: 10, state: "active" },
+    ],
+    links: [
+      { offerId: 1, name: "Offer 1", share: 20, active: true, pinned: true },
+      { offerId: 2, name: "Offer 2", share: 30, active: true, pinned: false },
+      { offerId: 3, name: "Offer 3", share: 40, active: true, pinned: false },
+      { offerId: 4, name: "Offer 4", share: 10, active: true, pinned: false },
+    ],
+  });
+  const result = await service.setOfferShare(7, 11, 2, 40);
+  assert.deepEqual(result.streams[0].offers.map(({ offer_id, share }) => [offer_id, share]), [
+    [1, 20],
+    [2, 40],
+    [3, 20],
+    [4, 20],
+  ]);
+});
+
+test("pinning preserves that share and splits the remaining active shares equally", async () => {
+  const { service } = setup({
+    catalog: [1, 2, 3, 4],
+    remoteOffers: [
+      { offer_id: 1, share: 40, state: "active" },
+      { offer_id: 2, share: 30, state: "active" },
+      { offer_id: 3, share: 20, state: "active" },
+      { offer_id: 4, share: 10, state: "active" },
+    ],
+    links: [
+      { offerId: 1, name: "Offer 1", share: 40, active: true, pinned: false },
+      { offerId: 2, name: "Offer 2", share: 30, active: true, pinned: false },
+      { offerId: 3, name: "Offer 3", share: 20, active: true, pinned: false },
+      { offerId: 4, name: "Offer 4", share: 10, active: true, pinned: false },
+    ],
+  });
+  const pinned = await service.setOfferPinned(7, 11, 1, true);
+  assert.deepEqual(pinned.streams[0].offers.map(({ share }) => share), [40, 20, 20, 20]);
+
+  const unpinned = await service.setOfferPinned(7, 11, 1, false);
+  assert.deepEqual(unpinned.streams[0].offers.map(({ share }) => share), [25, 25, 25, 25]);
+});
+
 test("bulk offer changes preserve pinned shares and retain deactivated offers", async () => {
   const { service, stream, model } = setup({
     links: [
@@ -218,7 +270,7 @@ test("an offer removed from Keitaro stays locally visible and cannot be reactiva
   assert.equal(missing.available_in_keitaro, false);
   assert.equal(missing.last_share, 30);
   assert.equal(stream.offers.some((offer) => offer.offer_id === 2), false);
-  assert.deepEqual(stream.offers.map(({ offer_id, share }) => [offer_id, share]), [[1, 57], [3, 43]]);
+  assert.deepEqual(stream.offers.map(({ offer_id, share }) => [offer_id, share]), [[1, 50], [3, 50]]);
   assert.equal(stream.offers.reduce((sum, offer) => sum + offer.share, 0), 100);
   await assert.rejects(service.setOfferActive(7, 11, 2, true), (error) => {
     assert.ok(error instanceof ServiceError);

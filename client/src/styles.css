@@ -75,10 +75,12 @@ h1, h2, h3, p { margin-top: 0; }
 .table-scroll { overflow-x: auto; }
 .offers-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .offers-table th { padding: 11px 11px; color: #9aa3b3; font-size: 9px; font-weight: 700; letter-spacing: .45px; text-align: right; border-bottom: 1px solid #eff1f5; }
-.offers-table th:first-child { width: 40%; padding-left: 20px; text-align: left; }
-.offers-table th:nth-child(2) { width: 13%; }
-.offers-table th:nth-child(3), .offers-table th:nth-child(4), .offers-table th:nth-child(5) { width: 12%; }
-.offers-table th:last-child { width: 6%; }
+.offers-table th:first-child { width: 38%; padding-left: 20px; text-align: left; }
+.offers-table th:nth-child(2) { width: 19%; }
+.offers-table th:nth-child(3) { width: 12%; }
+.offers-table th:nth-child(4) { width: 14%; }
+.offers-table th:nth-child(5) { width: 10%; }
+.offers-table th:last-child { width: 7%; text-align: center; }
 .offers-table td { height: 58px; padding: 7px 11px; border-bottom: 1px solid #f0f2f6; text-align: right; color: #5c6880; font-size: 11px; }
 .offers-table td:first-child { padding-left: 20px; text-align: left; }
 .offers-table .offer-cell { display: flex; align-items: center; gap: 11px; }
@@ -98,23 +100,24 @@ h1, h2, h3, p { margin-top: 0; }
 .toggle span { width: 13px; height: 13px; display: block; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px #0002; transition: .16s; }
 .toggle.on { background: #42b889; }
 .toggle.on span { transform: translateX(12px); }
-.share-control { display: inline-flex; align-items: center; gap: 4px; color: #53617a; }
+.share-control { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; color: #53617a; }
+.lock-button { width: 24px; height: 28px; display: grid; flex: 0 0 24px; place-items: center; padding: 2px; border: 0; border-radius: 5px; color: #aeb8c8; background: transparent; }
+.lock-button:hover, .lock-button.locked { color: #4f6fe5; }
+.lock-button:disabled { color: #d7dce5; }
+.lock-button svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
 .share-control input { width: 43px; padding: 5px 4px; border: 1px solid #e4e8ef; border-radius: 5px; outline: none; text-align: right; color: #4a5872; font-size: 11px; }
 .share-control input:focus { border-color: #9caff8; box-shadow: 0 0 0 2px #4968e813; }
 .share-control input:disabled { background: #f5f7fb; color: #4968e8; font-weight: 700; }
 .stored-share { color: #8b95a5; font-size: 10px; }
 .stored-share small { color: #b0b7c2; font-size: 9px; }
 .stats-number { color: #657187 !important; font-variant-numeric: tabular-nums; }
-.icon-button { padding: 4px; border: 0; background: transparent; color: #bbc3d0; font-size: 17px; line-height: 1; }
-.icon-button:hover, .icon-button.pinned { color: #4f6fe5; }
-.icon-button:disabled { color: #d7dce5; }
+.offers-table .action-cell { text-align: center; }
 .offers-table tfoot td { height: 42px; border-bottom: 0; color: #818b9d; font-size: 9px; font-weight: 700; }
 .offers-table tfoot td:first-child { letter-spacing: .4px; }
 .offers-table tfoot .total-ok { color: #15936d; }
 .offers-table tfoot .total-error { color: #d34b50; }
 .stream-footer { min-height: 54px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 20px; background: #fcfcfe; border-top: 1px solid #f0f2f6; }
 .distribution-hint { color: #9aa3b0; font-size: 10px; }
-.pin-example { margin-right: 4px; color: #5974e8; }
 .save-button { padding: 8px 12px; font-size: 10px; }
 .stream-actions { display: flex; align-items: center; gap: 7px; }
 .reset-button { padding: 8px 12px; font-size: 10px; }

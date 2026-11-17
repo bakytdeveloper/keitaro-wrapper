@@ -1,5 +1,5 @@
 import { ServiceError, KeitaroError } from "./errors.js";
-import { parseGeo, rebalanceOffers, redistribute, withNewOffer } from "./shares.js";
+import { equalSplit, parseGeo, rebalanceOffers, withNewOffer } from "./shares.js";
 import { CampaignRecord } from "./models/CampaignRecord.js";
 import { CampaignOffer } from "./models/CampaignOffer.js";
 import { OfferChange } from "./models/OfferChange.js";
@@ -485,7 +485,12 @@ export class CampaignService {
       return this.setOfferActive(campaignId, streamId, offerId, true);
     }
     offers = offers.map((offer) => offer.toObject());
-    const newShare = withNewOffer(offers, share);
+    let newShare;
+    try {
+      newShare = withNewOffer(offers, share);
+    } catch (error) {
+      throw new ServiceError(409, error.message);
+    }
     offers.push({
       campaignId,
       streamId,
@@ -496,11 +501,6 @@ export class CampaignService {
       active: true,
       pinned: false,
     });
-    try {
-      rebalanceOffers(offers);
-    } catch (error) {
-      throw new ServiceError(409, error.message);
-    }
     return this._saveOffers(campaignId, streamId, offers, "add", offerId);
   }
 
@@ -531,9 +531,13 @@ export class CampaignService {
           .reduce((sum, offer) => sum + offer.share, 0);
         const availableShare = 100 - fixedShare;
         if (availableShare < 1) throw new RangeError("Закреплённые офферы уже занимают 100%");
-        restored.share = Math.min(restored.lastShare || 1, availableShare);
+        const flexibleOthers = offers.filter((offer) => (
+          offer.offerId !== restored.offerId && offer.active && !offer.pinned
+        ));
+        restored.share = flexibleOthers.length
+          ? Math.min(restored.lastShare || 1, availableShare)
+          : availableShare;
         restored.share = withNewOffer(offers.filter((offer) => offer.offerId !== restored.offerId), restored.share);
-        rebalanceOffers(offers);
       } catch (error) {
         restored.active = false;
         restored.share = 0;
@@ -570,6 +574,11 @@ export class CampaignService {
     if (!target) throw new ServiceError(404, `Оффера ${offerId} нет в этом потоке`);
     if (!target.active) throw new ServiceError(409, "Закрепить можно только активный оффер");
     target.pinned = Boolean(pinned);
+    try {
+      rebalanceOffers(offers);
+    } catch (error) {
+      throw new ServiceError(409, error.message);
+    }
     return this._saveOffers(campaignId, streamId, offers, "pin", offerId);
   }
 
@@ -690,7 +699,7 @@ export class CampaignService {
     }
     target.share = share;
     target.lastShare = share;
-    const nextShares = redistribute(others.map((offer) => offer.share), remaining);
+    const nextShares = equalSplit(others.length, remaining);
     others.forEach((offer, index) => {
       offer.share = nextShares[index];
       offer.lastShare = nextShares[index];

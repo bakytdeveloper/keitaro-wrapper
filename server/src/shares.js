@@ -5,21 +5,6 @@ export function equalSplit(count, total = 100) {
   return Array.from({ length: count }, (_, index) => base + (index < remainder ? 1 : 0));
 }
 
-export function redistribute(weights, total = 100) {
-  if (!weights.length) return [];
-  const positive = weights.map((weight) => Math.max(Number(weight) || 0, 0));
-  const sum = positive.reduce((acc, weight) => acc + weight, 0);
-  if (!sum) return equalSplit(weights.length, total);
-
-  const raw = positive.map((weight) => (weight * total) / sum);
-  const result = raw.map(Math.floor);
-  let remainder = total - result.reduce((acc, value) => acc + value, 0);
-  const order = raw.map((value, index) => ({ index, fraction: value - result[index] }))
-    .sort((a, b) => b.fraction - a.fraction);
-  for (const { index } of order.slice(0, remainder)) result[index] += 1;
-  return result;
-}
-
 export function rebalanceOffers(offers) {
   const active = offers.filter((offer) => offer.active);
   const pinnedTotal = active
@@ -32,7 +17,7 @@ export function rebalanceOffers(offers) {
   if (!flexible.length && remainder !== 0) {
     throw new RangeError("Невозможно распределить остаток: открепите один из офферов");
   }
-  const shares = redistribute(flexible.map((offer) => offer.share), remainder);
+  const shares = equalSplit(flexible.length, remainder);
   flexible.forEach((offer, index) => { offer.share = shares[index]; });
   offers.filter((offer) => !offer.active).forEach((offer) => { offer.share = 0; });
   return offers;
@@ -50,9 +35,14 @@ export function withNewOffer(existing, newShare) {
   }
 
   const flexible = existing.filter((offer) => offer.active && !offer.pinned);
-  const targetShare = desiredShare ?? Math.max(1, Math.floor(available / (flexible.length + 1)));
-  const remainder = available - targetShare;
-  const distributed = redistribute(flexible.map((offer) => offer.share), remainder);
+  if (desiredShare != null && !flexible.length && desiredShare !== available) {
+    throw new RangeError("Невозможно оставить остаток без другого незакреплённого оффера");
+  }
+  const shares = desiredShare == null
+    ? equalSplit(flexible.length + 1, available)
+    : equalSplit(flexible.length, available - desiredShare);
+  const targetShare = desiredShare ?? shares[flexible.length];
+  const distributed = desiredShare == null ? shares.slice(0, flexible.length) : shares;
   flexible.forEach((offer, index) => { offer.share = distributed[index]; });
   return targetShare;
 }
