@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { formatStreamFilters } from "./formatters.js";
 
 async function api(path, options = {}) {
   const response = await fetch(`/api${path}`, {
@@ -240,7 +241,7 @@ function OfferRow({ offer, dirty, onActive, onPin, onShare, onShareCommit, savin
               />
               <span>%</span>
             </>
-            : <span className={`stored-share${dirty ? " pending-control" : ""}`}>{offer.last_share}% <small>сохранено</small></span>}
+            : <span className={`stored-share${dirty ? " pending-control" : ""}`}>{offer.share}%</span>}
         </div>
       </td>
       <td className="stats-number">{offer.clicks.toLocaleString("ru-RU")}</td>
@@ -545,10 +546,11 @@ function App() {
               <button className="button primary" onClick={() => { setCreated(null); setPage("create"); }}>＋ Новая кампания</button>
             </div>
             <section className="toolbar card">
-              <label className="search-field">
-                <span className="search-icon">⌕</span>
+              <div className="search-field">
+                <span className="search-icon" aria-hidden="true">⌕</span>
                 <input
                   value={query}
+                  aria-label="Поиск кампаний"
                   onChange={(event) => {
                     setQuery(event.target.value);
                     clearTimeout(window.campaignSearchTimer);
@@ -556,7 +558,24 @@ function App() {
                   }}
                   placeholder="Найти кампанию по названию или ID"
                 />
-              </label>
+                {query && (
+                  <button
+                    className="search-clear"
+                    type="button"
+                    aria-label="Очистить поиск"
+                    title="Очистить поиск"
+                    onClick={() => {
+                      clearTimeout(window.campaignSearchTimer);
+                      setQuery("");
+                      loadCampaigns("");
+                    }}
+                  >
+                    <svg viewBox="0 0 16 16" aria-hidden="true">
+                      <path d="m4 4 8 8M12 4l-8 8" />
+                    </svg>
+                  </button>
+                )}
+              </div>
               <select
                 value={campaignId}
                 onChange={(event) => {
@@ -580,14 +599,6 @@ function App() {
                 <option value="last_7_days">Последние 7 дней</option>
                 <option value="all_time">Всё время</option>
               </select>
-              <button
-                className="button secondary"
-                onClick={() => {
-                  if (hasPendingDrafts && !window.confirm("Есть несохранённые изменения. Сбросить их и обновить данные?")) return;
-                  loadView();
-                }}
-                disabled={!campaignId || loading}
-              >Обновить</button>
             </section>
             {loading && !view ? <div className="loading-state"><span className="spinner" /> Загружаем данные Keitaro…</div> : null}
             {!loading && !campaigns.length && <div className="empty-state card"><div className="empty-icon">↗</div><h2>Пока нет кампаний</h2><p>Создайте кампанию — потоки и первый оффер настроятся автоматически.</p><button className="button primary" onClick={() => setPage("create")}>Создать кампанию</button></div>}
@@ -614,16 +625,20 @@ function App() {
                     stream.offers.find((original) => original.offer_id === item.offer_id),
                     item,
                   ));
+                  const filterDescription = formatStreamFilters(stream.filters);
                   return (
                     <section className="stream-card card" key={stream.id}>
                       <div className="stream-heading">
                         <div className="stream-title-wrap">
                           <span className="stream-icon">↗</span>
-                          <div><h3>{stream.name || `Поток ${stream.id}`}</h3><span>Поток #{stream.id} <span className="divider">/</span> {stream.schema}</span></div>
+                          <div>
+                            <h3>{stream.editable ? "Offer" : stream.name || `Поток ${stream.id}`}</h3>
+                            {!stream.editable && <span>Поток #{stream.id} <span className="divider">/</span> {stream.schema}</span>}
+                          </div>
                         </div>
                         <span className="stream-badge">{stream.editable ? `${streamOffers.filter((item) => item.active).length} активных` : "Без офферов"}</span>
                       </div>
-                      {stream.filters.length > 0 && <div className="stream-filter">Фильтры: {stream.filters.map((filter) => `${filter.name} ${filter.mode} ${(filter.payload || []).join(", ")}`).join("; ")}</div>}
+                      {filterDescription && <div className="stream-filter">Фильтры: {filterDescription}</div>}
                       {stream.share_warning && <div className="inline-alert stream-alert">{stream.share_warning}</div>}
                       {!stream.editable ? (
                         <div className="readonly-note">Этот поток не содержит офферов для управления.</div>

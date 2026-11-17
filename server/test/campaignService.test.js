@@ -157,6 +157,62 @@ test("deactivating an offer retains it and reallocates only unpinned shares", as
   ]);
 });
 
+test("an offer removed from a campaign stream is deactivated and can be restored from the app", async () => {
+  const { service, stream } = setup({
+    links: [
+      { offerId: 1, name: "Offer 1", share: 40, active: true },
+      { offerId: 2, name: "Offer 2", share: 30, active: true },
+      { offerId: 3, name: "Offer 3", share: 30, active: true },
+    ],
+    remoteOffers: [
+      { offer_id: 1, share: 40, state: "active" },
+      { offer_id: 3, share: 60, state: "active" },
+    ],
+  });
+
+  const afterRemoval = await service.campaignView(7);
+  const missing = afterRemoval.streams[0].offers.find((offer) => offer.offer_id === 2);
+  assert.equal(missing.active, false);
+  assert.equal(missing.share, 0);
+  assert.equal(missing.available_in_keitaro, true);
+  assert.equal(stream.offers.find((offer) => offer.offer_id === 2).share, 0);
+
+  const restored = await service.setOfferActive(7, 11, 2, true);
+  const offers = restored.streams[0].offers;
+  assert.deepEqual(offers.map(({ offer_id, share, active }) => [offer_id, share, active]), [
+    [1, 35, true],
+    [2, 30, true],
+    [3, 35, true],
+  ]);
+  assert.equal(stream.offers.find((offer) => offer.offer_id === 2).share, 30);
+});
+
+test("an offer added to a Keitaro campaign stream is activated and shares are rebalanced", async () => {
+  const { service, stream } = setup({
+    catalog: [1, 2, 3, 4],
+    links: [
+      { offerId: 1, name: "Offer 1", share: 40, active: true, pinned: true },
+      { offerId: 2, name: "Offer 2", share: 30, active: true },
+      { offerId: 3, name: "Offer 3", share: 30, active: true },
+    ],
+    remoteOffers: [
+      { offer_id: 1, share: 40, state: "active" },
+      { offer_id: 2, share: 30, state: "active" },
+      { offer_id: 3, share: 30, state: "active" },
+      { offer_id: 4, share: 0, state: "active" },
+    ],
+  });
+
+  const result = await service.campaignView(7);
+  assert.deepEqual(result.streams[0].offers.map(({ offer_id, share, active }) => [offer_id, share, active]), [
+    [1, 40, true],
+    [2, 20, true],
+    [3, 20, true],
+    [4, 20, true],
+  ]);
+  assert.equal(stream.offers.find((offer) => offer.offer_id === 4).share, 20);
+});
+
 test("editing another offer's share leaves a pinned percentage unchanged", async () => {
   const { service } = setup({
     links: [
@@ -267,6 +323,7 @@ test("an offer removed from Keitaro stays locally visible and cannot be reactiva
   const result = await service.campaignView(7);
   const missing = result.streams[0].offers.find((offer) => offer.offer_id === 2);
   assert.equal(missing.active, false);
+  assert.equal(missing.share, 0);
   assert.equal(missing.available_in_keitaro, false);
   assert.equal(missing.last_share, 30);
   assert.equal(stream.offers.some((offer) => offer.offer_id === 2), false);

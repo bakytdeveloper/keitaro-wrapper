@@ -277,6 +277,8 @@ export class CampaignService {
     const byId = new Map(links.map((link) => [asNumber(link.offerId), link]));
     let shouldRemoveUnavailable = false;
     let deactivated = false;
+    let shouldRebalance = false;
+    const newlyAddedIds = new Set();
 
     for (const remote of remoteOffers) {
       const offerId = asNumber(remote.offer_id);
@@ -285,21 +287,27 @@ export class CampaignService {
       const remoteShare = Math.max(0, Math.min(100, asNumber(remote.share) || 0));
       if (!link) {
         if (!liveOffer && remoteShare > 0) deactivated = true;
+        const active = Boolean(liveOffer && remote.state !== "disabled");
         link = await OfferModel.create({
           campaignId,
           streamId,
           offerId,
           name: liveOffer?.name || `#${offerId}`,
-          share: liveOffer ? remoteShare : 0,
+          share: active ? remoteShare : 0,
           lastShare: remoteShare,
-          active: Boolean(liveOffer && remoteShare > 0 && remote.state !== "disabled"),
+          active,
           pinned: false,
         });
         byId.set(offerId, link);
+        if (active) {
+          newlyAddedIds.add(offerId);
+          shouldRebalance = true;
+        }
       } else if (!liveOffer) {
         if (link.active) {
           link.lastShare = link.share || remoteShare || link.lastShare;
           deactivated = true;
+          shouldRebalance = true;
         }
         link.active = false;
         link.pinned = false;
@@ -324,6 +332,7 @@ export class CampaignService {
         link.active = false;
         link.pinned = false;
         deactivated = true;
+        shouldRebalance = true;
         await link.save();
       }
       if (!catalog.has(offerId)) shouldRemoveUnavailable = shouldRemoveUnavailable || remoteById.has(offerId);
@@ -332,17 +341,38 @@ export class CampaignService {
     links = await OfferModel.find({ campaignId, streamId });
     const activeCount = links.filter((link) => link.active).length;
     let shareWarning = null;
-    if (deactivated) {
+    let newOfferBlocked = false;
+    if (shouldRebalance || deactivated) {
       if (activeCount > 0) {
-        try {
-          rebalanceOffers(links);
-        } catch (error) {
-          shareWarning = `Оффер был удалён в Keitaro, но доли закреплённых офферов нельзя распределить на 100%: ${error.message}`;
+        const pinnedTotal = links
+          .filter((link) => link.active && link.pinned)
+          .reduce((sum, link) => sum + link.share, 0);
+        if (newlyAddedIds.size && pinnedTotal === 100) {
+          links
+            .filter((link) => newlyAddedIds.has(asNumber(link.offerId)))
+            .forEach((link) => {
+              link.active = false;
+              link.pinned = false;
+              link.share = 0;
+            });
+          newOfferBlocked = true;
+          shareWarning = "Новый оффер оставлен выключенным: закреплённые офферы занимают 100% долей";
+        } else {
+          try {
+            rebalanceOffers(links);
+            links.filter((link) => link.active).forEach((link) => {
+              link.lastShare = link.share;
+            });
+          } catch (error) {
+            shareWarning = `Не удалось перераспределить доли офферов: ${error.message}`;
+          }
         }
       }
-      if (!shareWarning) await Promise.all(links.map((link) => link.save()));
+      await Promise.all(links.map((link) => link.save()));
     }
-    if (!shareWarning && (deactivated || shouldRemoveUnavailable) && links.some((link) => catalog.has(asNumber(link.offerId)))) {
+    const streamChanged = deactivated || shouldRemoveUnavailable || newlyAddedIds.size > 0;
+    if ((!shareWarning || newOfferBlocked) && streamChanged
+      && links.some((link) => catalog.has(asNumber(link.offerId)))) {
       await this.client.updateStream(streamId, {
         offers: links
           .filter((link) => catalog.has(asNumber(link.offerId)))
