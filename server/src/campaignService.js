@@ -371,16 +371,16 @@ export class CampaignService {
       await Promise.all(links.map((link) => link.save()));
     }
     const streamChanged = deactivated || shouldRemoveUnavailable || newlyAddedIds.size > 0;
-    if ((!shareWarning || newOfferBlocked) && streamChanged
-      && links.some((link) => catalog.has(asNumber(link.offerId)))) {
+    const activeAvailableOffers = links.filter((link) => (
+      link.active && catalog.has(asNumber(link.offerId))
+    ));
+    if ((!shareWarning || newOfferBlocked) && streamChanged && activeAvailableOffers.length) {
       await this.client.updateStream(streamId, {
-        offers: links
-          .filter((link) => catalog.has(asNumber(link.offerId)))
-          .map((link) => ({
-            offer_id: link.offerId,
-            share: link.active ? link.share : 0,
-            state: "active",
-          })),
+        offers: activeAvailableOffers.map((link) => ({
+          offer_id: link.offerId,
+          share: link.share,
+          state: "active",
+        })),
       });
     }
     links = await OfferModel.find({ campaignId, streamId });
@@ -470,10 +470,10 @@ export class CampaignService {
     const { CampaignOffer: OfferModel, OfferChange: ChangeModel } = this.models;
     const catalog = new Map(asArray(await this.client.listOffers()).map((offer) => [asNumber(offer.id), offer]));
     const payload = offers
-      .filter((offer) => catalog.has(asNumber(offer.offerId)))
+      .filter((offer) => offer.active && catalog.has(asNumber(offer.offerId)))
       .map((offer) => ({
         offer_id: offer.offerId,
-        share: offer.active ? offer.share : 0,
+        share: offer.share,
         state: "active",
       }));
     await this.client.updateStream(streamId, { offers: payload });
@@ -555,19 +555,14 @@ export class CampaignService {
       const restored = offers.find((offer) => asNumber(offer.offerId) === asNumber(offerId));
       restored.name = liveOffer.name || restored.name;
       restored.active = true;
+      restored.pinned = false;
       try {
         const fixedShare = offers
           .filter((offer) => offer.offerId !== restored.offerId && offer.active && offer.pinned)
           .reduce((sum, offer) => sum + offer.share, 0);
         const availableShare = 100 - fixedShare;
         if (availableShare < 1) throw new RangeError("Закреплённые офферы уже занимают 100%");
-        const flexibleOthers = offers.filter((offer) => (
-          offer.offerId !== restored.offerId && offer.active && !offer.pinned
-        ));
-        restored.share = flexibleOthers.length
-          ? Math.min(restored.lastShare || 1, availableShare)
-          : availableShare;
-        restored.share = withNewOffer(offers.filter((offer) => offer.offerId !== restored.offerId), restored.share);
+        rebalanceOffers(offers);
       } catch (error) {
         restored.active = false;
         restored.share = 0;

@@ -365,23 +365,16 @@ function App() {
           notify(`Оффер ${target.offer_id} сначала нужно восстановить в Keitaro`, "error");
           return;
         }
+        const pinnedTotal = offers
+          .filter((entry) => entry.active && entry.pinned)
+          .reduce((sum, entry) => sum + entry.share, 0);
+        if (pinnedTotal >= 100) {
+          notify("Закреплённые офферы уже занимают 100%", "error");
+          return;
+        }
         target.active = true;
         target.pinned = false;
-        const pinnedTotal = offers
-          .filter((entry) => entry.offer_id !== target.offer_id && entry.active && entry.pinned)
-          .reduce((sum, entry) => sum + entry.share, 0);
-        const flexibleOthers = offers.filter((entry) => (
-          entry.offer_id !== target.offer_id && entry.active && !entry.pinned
-        ));
-        const available = 100 - pinnedTotal;
-        target.share = flexibleOthers.length
-          ? Math.min(target.last_share || 1, available)
-          : available;
-        try {
-          updateStreamDraft(stream.id, setDraftOfferShare(offers, target.offer_id, target.share));
-        } catch (error) {
-          notify(error.message, "error");
-        }
+        updateStreamDraft(stream.id, balanceDraftOffers(offers));
         return;
       }
       if (offers.filter((entry) => entry.active).length <= 1) {

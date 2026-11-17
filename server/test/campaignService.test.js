@@ -146,7 +146,8 @@ test("deactivating an offer retains it and reallocates only unpinned shares", as
     [2, 0, false, 30],
     [3, 60, true, 60],
   ]);
-  assert.deepEqual(stream.offers.map(({ offer_id, share }) => [offer_id, share]), [[1, 40], [2, 0], [3, 60]]);
+  assert.deepEqual(stream.offers.map(({ offer_id, share }) => [offer_id, share]), [[1, 40], [3, 60]]);
+  assert.equal(stream.offers.some((offer) => offer.offer_id === 2), false);
   assert.equal(model.documents.length, 3);
 
   const restored = await service.setOfferActive(7, 11, 2, true);
@@ -155,6 +156,39 @@ test("deactivating an offer retains it and reallocates only unpinned shares", as
     [2, 30],
     [3, 30],
   ]);
+  assert.equal(stream.offers.find((offer) => offer.offer_id === 2).state, "active");
+});
+
+test("reactivating an offer redistributes active shares and leaves other offers disabled", async () => {
+  const { service, stream } = setup({
+    catalog: [1, 2, 3, 4],
+    links: [
+      { offerId: 1, name: "Offer 1", share: 50, active: true },
+      { offerId: 2, name: "Offer 2", share: 0, lastShare: 30, active: false },
+      { offerId: 3, name: "Offer 3", share: 50, active: true },
+      { offerId: 4, name: "Offer 4", share: 0, lastShare: 20, active: false },
+    ],
+    remoteOffers: [
+      { offer_id: 1, share: 50, state: "active" },
+      { offer_id: 3, share: 50, state: "active" },
+    ],
+  });
+
+  const result = await service.setOfferActive(7, 11, 2, true);
+  assert.deepEqual(result.streams[0].offers.map(({ offer_id, share, active }) => [
+    offer_id, share, active,
+  ]), [
+    [1, 34, true],
+    [2, 33, true],
+    [3, 33, true],
+    [4, 0, false],
+  ]);
+  assert.deepEqual(stream.offers.map(({ offer_id, share, state }) => [offer_id, share, state]), [
+    [1, 34, "active"],
+    [2, 33, "active"],
+    [3, 33, "active"],
+  ]);
+  assert.equal(stream.offers.some((offer) => offer.offer_id === 4), false);
 });
 
 test("an offer removed from a campaign stream is deactivated and can be restored from the app", async () => {
@@ -175,16 +209,17 @@ test("an offer removed from a campaign stream is deactivated and can be restored
   assert.equal(missing.active, false);
   assert.equal(missing.share, 0);
   assert.equal(missing.available_in_keitaro, true);
-  assert.equal(stream.offers.find((offer) => offer.offer_id === 2).share, 0);
+  assert.equal(stream.offers.some((offer) => offer.offer_id === 2), false);
 
   const restored = await service.setOfferActive(7, 11, 2, true);
   const offers = restored.streams[0].offers;
   assert.deepEqual(offers.map(({ offer_id, share, active }) => [offer_id, share, active]), [
-    [1, 35, true],
-    [2, 30, true],
-    [3, 35, true],
+    [1, 34, true],
+    [2, 33, true],
+    [3, 33, true],
   ]);
-  assert.equal(stream.offers.find((offer) => offer.offer_id === 2).share, 30);
+  assert.equal(stream.offers.find((offer) => offer.offer_id === 2).share, 33);
+  assert.equal(stream.offers.find((offer) => offer.offer_id === 2).state, "active");
 });
 
 test("an offer added to a Keitaro campaign stream is activated and shares are rebalanced", async () => {
@@ -297,7 +332,11 @@ test("bulk offer changes preserve pinned shares and retain deactivated offers", 
     [2, 0, false, 30],
     [3, 65, true, 65],
   ]);
-  assert.deepEqual(stream.offers.map(({ offer_id, share }) => [offer_id, share]), [[1, 35], [2, 0], [3, 65]]);
+  assert.deepEqual(stream.offers.map(({ offer_id, share }) => [offer_id, share]), [[1, 35], [3, 65]]);
+  assert.deepEqual(stream.offers.map(({ offer_id, state }) => [offer_id, state]), [
+    [1, "active"],
+    [3, "active"],
+  ]);
   assert.equal(model.documents.length, 3);
 
   await assert.rejects(service.setOffers(7, 11, [
