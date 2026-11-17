@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatStreamFilters } from "./formatters.js";
 
+const SELECTED_CAMPAIGN_STORAGE_KEY = "keitaro-flow:selected-campaign";
+
+function getStoredCampaignId() {
+  try {
+    return window.localStorage.getItem(SELECTED_CAMPAIGN_STORAGE_KEY) || "";
+  } catch (error) {
+    console.error("Не удалось прочитать выбранную кампанию из локального хранилища браузера", error);
+    return "";
+  }
+}
+
 async function api(path, options = {}) {
   const response = await fetch(`/api${path}`, {
     ...options,
@@ -268,8 +279,7 @@ function App() {
   const [meta, setMeta] = useState(null);
   const [campaigns, setCampaigns] = useState([]);
   const [query, setQuery] = useState("");
-  const [campaignId, setCampaignId] = useState("");
-  const [interval, setInterval] = useState("today");
+  const [campaignId, setCampaignId] = useState(getStoredCampaignId);
   const [view, setView] = useState(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -328,11 +338,11 @@ function App() {
     }
   }, [campaignId, hasPendingDrafts, notify, query]);
 
-  const loadView = useCallback(async (id = campaignId, period = interval) => {
+  const loadView = useCallback(async (id = campaignId) => {
     if (!id) return;
     setLoading(true);
     try {
-      const data = await api(`/campaigns/${id}?interval=${encodeURIComponent(period)}`);
+      const data = await api(`/campaigns/${id}`);
       setView(data);
       setDrafts(createInitialDrafts(data));
     } catch (error) {
@@ -340,13 +350,25 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, [campaignId, interval, notify]);
+  }, [campaignId, notify]);
 
   useEffect(() => { loadMeta(); }, [loadMeta]);
   useEffect(() => { loadCampaigns(""); }, []); // Initial campaign list.
   useEffect(() => {
+    try {
+      if (campaignId) {
+        window.localStorage.setItem(SELECTED_CAMPAIGN_STORAGE_KEY, campaignId);
+      } else {
+        window.localStorage.removeItem(SELECTED_CAMPAIGN_STORAGE_KEY);
+      }
+    } catch (error) {
+      console.error("Не удалось сохранить выбранную кампанию в локальное хранилище браузера", error);
+      notify("Не удалось сохранить выбранную кампанию в этом браузере", "error");
+    }
+  }, [campaignId, notify]);
+  useEffect(() => {
     if (page === "editor" && campaignId) loadView();
-  }, [page, campaignId, interval, loadView]);
+  }, [page, campaignId, loadView]);
 
   const updateStreamDraft = (streamId, offers) => {
     setDrafts((current) => ({
@@ -579,19 +601,6 @@ function App() {
               >
                 {campaigns.map((campaign) => <option value={campaign.id} key={campaign.id}>#{campaign.id} · {campaign.name}</option>)}
               </select>
-              <select
-                value={interval}
-                onChange={(event) => {
-                  if (hasPendingDrafts && !window.confirm("Есть несохранённые изменения. Сбросить их и загрузить другой период?")) return;
-                  setInterval(event.target.value);
-                }}
-                aria-label="Период статистики"
-              >
-                <option value="today">Сегодня</option>
-                <option value="yesterday">Вчера</option>
-                <option value="last_7_days">Последние 7 дней</option>
-                <option value="all_time">Всё время</option>
-              </select>
             </section>
             {loading && !view ? <div className="loading-state"><span className="spinner" /> Загружаем данные Keitaro…</div> : null}
             {!loading && !campaigns.length && <div className="empty-state card"><div className="empty-icon">↗</div><h2>Пока нет кампаний</h2><p>Создайте кампанию — потоки и первый оффер настроятся автоматически.</p><button className="button primary" onClick={() => setPage("create")}>Создать кампанию</button></div>}
@@ -609,7 +618,12 @@ function App() {
                   <span className={view.campaign.state === "active" ? "status-pill active-status" : "status-pill"}>{view.campaign.state || "неизвестно"}</span>
                 </section>
                 {view.stats_error && <div className="inline-alert">Статистика недоступна: {view.stats_error}</div>}
-                <div className="section-title-row"><div><h2>Потоки кампании</h2><p>Закреплённая доля сохраняется, пока вы не открепите оффер.</p></div><span className="period-label">Период: {interval === "today" ? "сегодня" : interval === "yesterday" ? "вчера" : interval === "last_7_days" ? "7 дней" : "всё время"}</span></div>
+                <div className="section-title-row">
+                  <div>
+                    <h2>Потоки кампании</h2>
+                    <p>Закреплённая доля сохраняется, пока вы не открепите оффер.</p>
+                  </div>
+                </div>
                 {view.streams.map((stream) => {
                   const streamOffers = getDraftOffers(stream, drafts);
                   const draftTotal = streamOffers.filter((item) => item.active)
@@ -637,6 +651,16 @@ function App() {
                         <div className="readonly-note">Этот поток не содержит офферов для управления.</div>
                       ) : (
                         <>
+                          <div className="stream-controls">
+                            <div className="distribution-hint">
+                              Закрытый замок фиксирует долю; открытый позволяет перераспределять её.
+                              {streamDirty && <strong className="pending-label"> Есть несохранённые изменения</strong>}
+                            </div>
+                            <div className="stream-actions">
+                              <button className="button secondary reset-button" disabled={saving || !streamDirty} onClick={() => resetDraft(stream)}>Сбросить</button>
+                              <button className="button primary save-button" disabled={saving || !streamDirty || draftTotal !== 100} onClick={() => applyDraft(stream)}>Применить изменения</button>
+                            </div>
+                          </div>
                           <div className="table-scroll">
                             <table className="offers-table">
                               <thead><tr><th>ОФФЕР</th><th>ДОЛЯ</th><th>КЛИКИ</th><th>УНИКАЛЬНЫЕ</th><th>БОТЫ</th><th>АКТИВНОСТЬ</th></tr></thead>
@@ -660,16 +684,6 @@ function App() {
                               </tbody>
                               <tfoot><tr><td>ИТОГО АКТИВНЫЕ</td><td className={draftTotal === 100 ? "total-ok" : "total-error"}>{draftTotal}%</td><td>{stream.totals.clicks.toLocaleString("ru-RU")}</td><td>{stream.totals.unique_clicks.toLocaleString("ru-RU")}</td><td>{stream.totals.bots.toLocaleString("ru-RU")}</td><td /></tr></tfoot>
                             </table>
-                          </div>
-                          <div className="stream-footer">
-                            <div className="distribution-hint">
-                              Закрытый замок фиксирует долю; открытый позволяет перераспределять её.
-                              {streamDirty && <strong className="pending-label"> Есть несохранённые изменения</strong>}
-                            </div>
-                            <div className="stream-actions">
-                              <button className="button secondary reset-button" disabled={saving || !streamDirty} onClick={() => resetDraft(stream)}>Сбросить</button>
-                              <button className="button primary save-button" disabled={saving || !streamDirty || draftTotal !== 100} onClick={() => applyDraft(stream)}>Применить изменения</button>
-                            </div>
                           </div>
                           <div className="add-offer-row">
                             <div className="add-picker">                            <OfferPicker value={addOffer} onSelect={setAddOffer} placeholder="Добавить оффер по названию или ID" onError={notify} /></div>
@@ -701,7 +715,7 @@ function App() {
             <section className="create-card card">
               <div className="card-title"><div><h2>Параметры кампании</h2><p>Поля со звёздочкой обязательны</p></div><span className="required-note">* обязательное поле</span></div>
               <form onSubmit={createCampaign}>
-                <label className="form-field"><span>Название кампании <b>*</b></span><input required maxLength="200" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Например, Autumn AU test" />{meta?.defaults.name_prefix && <small>Префикс <code>{meta.defaults.name_prefix}</code> и суффикс <code>_company</code> добавятся автоматически; фамилия из префикса не будет повторена.</small>}</label>
+                <label className="form-field"><span>Название кампании <b>*</b></span><input required maxLength="200" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Например, Autumn AU test" />{meta?.defaults.name_prefix && <small>Префикс <code>{meta.defaults.name_prefix}</code> и суффикс <code>_campaign</code> добавятся автоматически; фамилия из префикса не будет повторена.</small>}</label>
                 <label className="form-field"><span>Гео <b>*</b></span><input required minLength="2" value={form.geo} onChange={(event) => setForm({ ...form, geo: event.target.value })} placeholder="AU, MX, RO" /><small>Двухбуквенные коды стран через запятую</small></label>
                 <label className="form-field"><span>Стартовый оффер <b>*</b></span><OfferPicker value={offer} onSelect={setOffer} placeholder="Найдите оффер в Keitaro" onError={notify} /></label>
                 <details className="advanced-settings">

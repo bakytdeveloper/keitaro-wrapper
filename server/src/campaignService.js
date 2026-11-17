@@ -25,13 +25,13 @@ function formatCampaignName(value, prefix) {
   if (repeatedPrefixPart && suffix.toLowerCase().startsWith(repeatedPrefixPart.toLowerCase())) {
     suffix = suffix.slice(repeatedPrefixPart.length).replace(/^[\s_-]+/, "");
   }
-  suffix = suffix.replace(/(?:[_\s-]+company)$/i, "").trim();
-  if (suffix.toLowerCase() === "company") suffix = "";
+  suffix = suffix.replace(/(?:[_\s-]+(?:company|campaign))$/i, "").trim();
+  if (suffix.toLowerCase() === "company" || suffix.toLowerCase() === "campaign") suffix = "";
 
   const namePrefix = configuredPrefix
     ? (configuredPrefix.endsWith("_") ? configuredPrefix : `${configuredPrefix}_`)
     : "";
-  return `${namePrefix}${suffix ? `${suffix}_` : ""}company`;
+  return `${namePrefix}${suffix ? `${suffix}_` : ""}campaign`;
 }
 
 function uniqueCampaignAlias(name, campaigns) {
@@ -239,12 +239,12 @@ export class CampaignService {
     return campaigns.sort((a, b) => b.id - a.id);
   }
 
-  async _stats(campaignId, interval) {
+  async _stats(campaignId) {
     let lastError = null;
     for (const dimensions of [["stream_id", "offer_id"], ["stream", "offer"]]) {
       try {
         const report = await this.client.buildReport({
-          range: { interval },
+          range: { interval: "today" },
           dimensions,
           measures: ["clicks", "campaign_unique_clicks", "bots"],
           filters: [{ name: "campaign_id", operator: "EQUALS", expression: campaignId }],
@@ -388,7 +388,7 @@ export class CampaignService {
     return links;
   }
 
-  async campaignView(campaignId, interval = "today") {
+  async campaignView(campaignId) {
     let campaign;
     try {
       campaign = await this.client.getCampaign(campaignId);
@@ -401,7 +401,7 @@ export class CampaignService {
     const [liveOffers, streams, { stats, error: statsError }] = await Promise.all([
       this.client.listOffers(),
       this.client.campaignStreams(campaignId),
-      this._stats(campaignId, interval),
+      this._stats(campaignId),
     ]);
     const catalog = new Map(asArray(liveOffers).map((offer) => [asNumber(offer.id), offer]));
     const views = [];
@@ -449,7 +449,6 @@ export class CampaignService {
     }
     return {
       campaign: { id: campaign.id, name: campaign.name, alias: campaign.alias, state: campaign.state },
-      interval,
       streams: views,
       stats_error: statsError,
     };

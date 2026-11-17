@@ -53,10 +53,7 @@ export function createApp(getService = createService) {
   });
   api.get("/campaigns", async (req, res) => res.json(await req.service.listCampaigns(req.query.q || "")));
   api.get("/campaigns/:campaignId", async (req, res) => {
-    res.json(await req.service.campaignView(
-      numericId(req.params.campaignId, "campaign_id"),
-      String(req.query.interval || "today"),
-    ));
+    res.json(await req.service.campaignView(numericId(req.params.campaignId, "campaign_id")));
   });
   api.post("/campaigns/:campaignId/streams/:streamId/offers", async (req, res) => {
     const offerId = numericId(req.body?.offer_id, "offer_id");

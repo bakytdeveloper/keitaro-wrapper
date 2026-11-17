@@ -67,7 +67,6 @@ h1, h2, h3, p { margin-top: 0; }
 .section-title-row { display: flex; align-items: end; justify-content: space-between; margin-bottom: 12px; }
 .section-title-row h2 { margin: 0 0 4px; font: 700 18px Manrope, sans-serif; }
 .section-title-row p { margin: 0; color: #8993a5; font-size: 13px; }
-.period-label { color: #8c96a7; font-size: 12px; }
 .stream-card { overflow: visible; margin-bottom: 15px; }
 .stream-heading { display: flex; align-items: center; padding: 15px 19px; border-bottom: 1px solid #eff1f5; }
 .stream-title-wrap { display: flex; align-items: center; gap: 11px; flex: 1; }
@@ -120,7 +119,7 @@ h1, h2, h3, p { margin-top: 0; }
 .offers-table tfoot td:first-child { letter-spacing: .4px; }
 .offers-table tfoot .total-ok { color: #15936d; }
 .offers-table tfoot .total-error { color: #d34b50; }
-.stream-footer { min-height: 54px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 20px; background: #fcfcfe; border-top: 1px solid #f0f2f6; }
+.stream-controls { min-height: 54px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 20px; background: #fcfcfe; border-bottom: 1px solid #f0f2f6; }
 .distribution-hint { color: #9aa3b0; font-size: 12px; }
 .save-button { padding: 8px 12px; font-size: 12px; }
 .stream-actions { display: flex; align-items: center; gap: 7px; }
@@ -222,12 +221,11 @@ h1, h2, h3, p { margin-top: 0; }
   .campaign-title { min-width: calc(100% - 65px); }
   .overview-metric { border-left: 0; padding-left: 5px; min-width: 72px; }
   .status-pill { margin-left: auto; }
-  .section-title-row { align-items: flex-start; gap: 8px; }
+  .section-title-row { align-items: stretch; flex-direction: column; gap: 12px; }
   .section-title-row p { max-width: 245px; line-height: 1.5; }
-  .period-label { padding-top: 3px; white-space: nowrap; }
   .stream-heading { padding: 12px; }
   .stream-filter { margin-left: 12px; margin-right: 12px; }
-  .stream-footer { align-items: flex-start; flex-direction: column; padding: 10px 12px; }
+  .stream-controls { align-items: flex-start; flex-direction: column; padding: 10px 12px; }
   .stream-actions { width: 100%; }
   .stream-actions .button { flex: 1; }
   .add-offer-row { flex-wrap: wrap; padding: 10px 12px 13px; }
